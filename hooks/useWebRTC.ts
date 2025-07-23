@@ -33,6 +33,7 @@ export const useWebRTC = (ably: RealtimePromise | null) => {
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoEnabled, setIsVideoEnabled] = useState(true);
   const [isJoining, setIsJoining] = useState(false);
+  const [mediaError, setMediaError] = useState<string | null>(null);
 
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const dataChannelRef = useRef<RTCDataChannel | null>(null);
@@ -93,16 +94,25 @@ export const useWebRTC = (ably: RealtimePromise | null) => {
   };
 
   const startLocalStream = useCallback(async (video: boolean, audio: boolean) => {
+    if (!peerConnectionRef.current) return null;
     try {
-      if (!peerConnectionRef.current) return null;
       const stream = await navigator.mediaDevices.getUserMedia({ video, audio });
       setLocalStream(stream);
       setIsVideoEnabled(video);
       stream.getTracks().forEach(track => peerConnectionRef.current?.addTrack(track, stream));
+      setMediaError(null);
       return stream;
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error accessing media devices.", error);
-      throw error;
+      if (error.name === 'NotFoundError') {
+          setMediaError('No camera or microphone found. Voice and video calls are disabled.');
+      } else if (error.name === 'NotAllowedError') {
+          setMediaError('Permission for camera and microphone was denied. Voice and video calls are disabled.');
+      } else {
+          setMediaError('Could not access camera or microphone.');
+      }
+      setLocalStream(null);
+      return null;
     }
   }, []);
 
@@ -161,7 +171,7 @@ export const useWebRTC = (ably: RealtimePromise | null) => {
     const myClientId = ably.auth.clientId;
     setupPeerConnection(myClientId);
 
-    // Start local media immediately so the user can see themselves.
+    // Attempt to start local media. This will set mediaError on failure but not crash.
     await startLocalStream(true, true);
 
     const channel = ably.channels.get(`p2p-chat:${roomName}`);
@@ -243,6 +253,7 @@ export const useWebRTC = (ably: RealtimePromise | null) => {
     setIsConnected(false);
     setIsJoining(false);
     setMessages([]);
+    setMediaError(null);
     earlyIceCandidatesRef.current = [];
     console.log('Call ended and resources cleaned up.');
   }, [localStream, remoteStream]);
@@ -272,7 +283,7 @@ export const useWebRTC = (ably: RealtimePromise | null) => {
   }, []);
 
   return {
-    localStream, remoteStream, messages, isConnected, isMuted, isVideoEnabled, isJoining,
+    localStream, remoteStream, messages, isConnected, isMuted, isVideoEnabled, isJoining, mediaError,
     joinRoom, sendMessage, hangUp, toggleMute, toggleVideo,
   };
 };

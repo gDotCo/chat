@@ -1,4 +1,3 @@
-
 import React, { useState, useMemo, useEffect } from 'react';
 import * as Ably from 'ably';
 import { Realtime } from 'ably';
@@ -11,29 +10,19 @@ import { VoiceCallView } from './components/VoiceCallView';
 import Icon from './components/Icon';
 import { ICON_PATHS } from './constants';
 
-// Extend ImportMeta type for Vite env variables
-declare global {
-  interface ImportMeta {
-    readonly env: {
-      VITE_ABLY_KEY: string;
-      [key: string]: any;
-    };
-  }
-}
 
 const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<View>('chat');
-  const [ably, setAbly] = useState< Ably.Realtime | null>(null);
+  const [ably, setAbly] = useState<Realtime | null>(null);
   const [ablyError, setAblyError] = useState<string | null>(null);
 
   useEffect(() => {
-    // IMPORTANT: You must create a free Ably account to get an API key
-    // and set it as an environment variable named ABLY_API_KEY.
+    // Vite injects environment variables here.
+    // This will be replaced by your GitHub Secret during the build process.
     const ABLY_API_KEY = import.meta.env.VITE_ABLY_KEY;
-    console.log('ABLY_API_KEY:', ABLY_API_KEY);
 
     if (!ABLY_API_KEY) {
-      setAblyError("Ably API Key not found. Please set the ABLY_API_KEY environment variable.");
+      setAblyError("Ably API Key not found. Ensure VITE_ABLY_API_KEY is set in your environment or GitHub Secrets.");
       return;
     }
     
@@ -57,7 +46,7 @@ const App: React.FC = () => {
   }, []);
 
   const {
-    localStream, remoteStream, messages, isConnected, isMuted, isVideoEnabled, isJoining,
+    localStream, remoteStream, messages, isConnected, isMuted, isVideoEnabled, isJoining, mediaError,
     joinRoom, sendMessage, hangUp, toggleMute, toggleVideo,
   } = useWebRTC(ably);
 
@@ -85,8 +74,19 @@ const App: React.FC = () => {
       );
     }
     
-    if (isJoining) {
-       return <div className="p-8 text-center text-dark-text-secondary">Joining room...</div>
+    if (isJoining && !localStream) {
+       return (
+        <div className="p-8 text-center text-dark-text-secondary">
+          <div className="flex items-center justify-center gap-2">
+            <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            Joining room...
+          </div>
+          {mediaError && <p className="mt-4 text-sm text-yellow-400">{mediaError}</p>}
+        </div>
+       );
     }
 
     switch (currentView) {
@@ -102,7 +102,7 @@ const App: React.FC = () => {
       default:
         return <ChatView messages={messages} sendMessage={sendMessage} />;
     }
-  }, [ably, ablyError, isConnected, isJoining, currentView, localStream, remoteStream, isMuted, isVideoEnabled, toggleMute, toggleVideo, handleHangUp, messages, sendMessage, joinRoom]);
+  }, [ably, ablyError, isConnected, isJoining, currentView, localStream, remoteStream, isMuted, isVideoEnabled, toggleMute, toggleVideo, handleHangUp, messages, sendMessage, handleJoinRoom, mediaError]);
 
   const statusText = isJoining ? 'Joining...' : (isConnected ? 'Connected' : 'Disconnected');
   const statusColor = isJoining ? 'bg-yellow-500' : (isConnected ? 'bg-green-500' : 'bg-red-500');
@@ -122,15 +122,30 @@ const App: React.FC = () => {
             <button onClick={() => setCurrentView('chat')} disabled={!isConnected} className={`p-2 rounded-full transition-colors ${currentView === 'chat' ? 'bg-blue-600' : 'hover:bg-gray-700'} disabled:opacity-50 disabled:cursor-not-allowed`}>
               <Icon path={ICON_PATHS.chat} />
             </button>
-            <button onClick={() => setCurrentView('voice')} disabled={!isConnected} className={`p-2 rounded-full transition-colors ${currentView === 'voice' ? 'bg-blue-600' : 'hover:bg-gray-700'} disabled:opacity-50 disabled:cursor-not-allowed`}>
+            <button 
+              onClick={() => setCurrentView('voice')} 
+              disabled={!isConnected || !!mediaError} 
+              title={mediaError ?? (isConnected ? 'Switch to voice call' : 'Connect to enable')}
+              className={`p-2 rounded-full transition-colors ${currentView === 'voice' ? 'bg-blue-600' : 'hover:bg-gray-700'} disabled:opacity-50 disabled:cursor-not-allowed`}
+            >
               <Icon path={ICON_PATHS.phone} />
             </button>
-            <button onClick={() => setCurrentView('video')} disabled={!isConnected} className={`p-2 rounded-full transition-colors ${currentView === 'video' ? 'bg-blue-600' : 'hover:bg-gray-700'} disabled:opacity-50 disabled:cursor-not-allowed`}>
+            <button 
+              onClick={() => setCurrentView('video')} 
+              disabled={!isConnected || !!mediaError}
+              title={mediaError ?? (isConnected ? 'Switch to video call' : 'Connect to enable')}
+              className={`p-2 rounded-full transition-colors ${currentView === 'video' ? 'bg-blue-600' : 'hover:bg-gray-700'} disabled:opacity-50 disabled:cursor-not-allowed`}
+            >
               <Icon path={ICON_PATHS.video} />
             </button>
           </nav>
         </header>
-        <main className="flex-1 overflow-hidden">
+        <main className="flex-1 overflow-hidden relative">
+           {mediaError && isConnected && (
+            <div className="absolute top-0 left-0 right-0 p-2 bg-yellow-600 text-white text-center text-sm z-10 animate-pulse">
+                <p>{mediaError}</p>
+            </div>
+           )}
           {ActiveView}
         </main>
       </div>
