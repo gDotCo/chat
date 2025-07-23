@@ -9,6 +9,16 @@ import { VoiceCallView } from './components/VoiceCallView';
 import Icon from './components/Icon';
 import { ICON_PATHS } from './constants';
 
+// Extend ImportMeta type for Vite env variables
+declare global {
+  interface ImportMeta {
+    readonly env: {
+      VITE_ABLY_KEY: string;
+      [key: string]: any;
+    };
+  }
+}
+
 // Assuming Ably is loaded from CDN
 declare const Ably: any;
 type RealtimePromise = any;
@@ -21,7 +31,7 @@ const App: React.FC = () => {
   useEffect(() => {
     // IMPORTANT: You must create a free Ably account to get an API key
     // and set it as an environment variable named ABLY_API_KEY.
-    const ABLY_API_KEY = process.env.VITE_ABLY_KEY;
+    const ABLY_API_KEY = import.meta.env.VITE_ABLY_KEY;
     console.log('ABLY_API_KEY:', ABLY_API_KEY);
 
     if (!ABLY_API_KEY) {
