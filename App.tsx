@@ -1,15 +1,16 @@
+
+
 import React, { useState, useMemo, useEffect } from 'react';
-import * as Ably from 'ably';
-import { Realtime } from 'ably';
+import Ably, { Realtime } from 'ably';
 import { useWebRTC } from './hooks/useWebRTC';
 import { View } from './types';
-import { RoomConnector } from './components/ConnectionManager'; // Now imports RoomConnector
+import { RoomConnector } from './components/ConnectionManager';
 import { ChatView } from './components/ChatView';
 import { VideoCallView } from './components/VideoCallView';
 import { VoiceCallView } from './components/VoiceCallView';
+import { CanvasView } from './components/CanvasView';
 import Icon from './components/Icon';
 import { ICON_PATHS } from './constants';
-
 
 const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<View>('chat');
@@ -21,7 +22,7 @@ const App: React.FC = () => {
     // This will be replaced by your GitHub Secret during the build process.
     const ABLY_API_KEY = import.meta.env.VITE_ABLY_KEY;
 
-    if (!ABLY_API_KEY) {
+    if (!ABLY_API_KEY ) {
       setAblyError("Ably API Key not found. Ensure VITE_ABLY_API_KEY is set in your environment or GitHub Secrets.");
       return;
     }
@@ -46,8 +47,8 @@ const App: React.FC = () => {
   }, []);
 
   const {
-    localStream, remoteStream, messages, isConnected, isMuted, isVideoEnabled, isJoining, mediaError,
-    joinRoom, sendMessage, hangUp, toggleMute, toggleVideo,
+    localStream, remoteStream, messages, isConnected, isMuted, isVideoEnabled, isJoining, mediaError, lastCanvasEvent,
+    joinRoom, sendMessage, hangUp, toggleMute, toggleVideo, sendDrawData, sendClearCanvas, sendTextData
   } = useWebRTC(ably);
 
   const handleHangUp = () => {
@@ -96,13 +97,22 @@ const App: React.FC = () => {
         );
       case 'voice':
         return (
-          <VoiceCallView isMuted={isMuted} onToggleMute={toggleMute} onHangUp={handleHangUp} />
+          <VoiceCallView remoteStream={remoteStream} isMuted={isMuted} onToggleMute={toggleMute} onHangUp={handleHangUp} />
+        );
+      case 'canvas':
+        return (
+            <CanvasView
+                sendDrawData={sendDrawData}
+                sendTextData={sendTextData}
+                sendClearCanvas={sendClearCanvas}
+                lastCanvasEvent={lastCanvasEvent}
+            />
         );
       case 'chat':
       default:
         return <ChatView messages={messages} sendMessage={sendMessage} />;
     }
-  }, [ably, ablyError, isConnected, isJoining, currentView, localStream, remoteStream, isMuted, isVideoEnabled, toggleMute, toggleVideo, handleHangUp, messages, sendMessage, handleJoinRoom, mediaError]);
+  }, [ably, ablyError, isConnected, isJoining, currentView, localStream, remoteStream, isMuted, isVideoEnabled, toggleMute, toggleVideo, handleHangUp, messages, sendMessage, handleJoinRoom, mediaError, lastCanvasEvent, sendDrawData, sendClearCanvas, sendTextData]);
 
   const statusText = isJoining ? 'Joining...' : (isConnected ? 'Connected' : 'Disconnected');
   const statusColor = isJoining ? 'bg-yellow-500' : (isConnected ? 'bg-green-500' : 'bg-red-500');
@@ -137,6 +147,9 @@ const App: React.FC = () => {
               className={`p-2 rounded-full transition-colors ${currentView === 'video' ? 'bg-blue-600' : 'hover:bg-gray-700'} disabled:opacity-50 disabled:cursor-not-allowed`}
             >
               <Icon path={ICON_PATHS.video} />
+            </button>
+             <button onClick={() => setCurrentView('canvas')} disabled={!isConnected} className={`p-2 rounded-full transition-colors ${currentView === 'canvas' ? 'bg-blue-600' : 'hover:bg-gray-700'} disabled:opacity-50 disabled:cursor-not-allowed`}>
+              <Icon path={ICON_PATHS.pen} />
             </button>
           </nav>
         </header>

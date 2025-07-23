@@ -1,11 +1,7 @@
+
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { Message, SignalingMessage } from '../types';
-
-// Assuming Ably is loaded from CDN
-declare const Ably: any;
-type RealtimePromise = any;
-type RealtimeChannelPromise = any;
-
+import { Realtime } from 'ably';
+import { Message, SignalingMessage, DataChannelData, DrawData, ClearData, TextData, CanvasEventData } from '../types';
 
 const ICE_SERVERS = {
   iceServers: [
@@ -25,7 +21,7 @@ const ICE_SERVERS = {
   ],
 };
 
-export const useWebRTC = (ably: RealtimePromise | null) => {
+export const useWebRTC = (ably: Realtime | null) => {
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -34,10 +30,12 @@ export const useWebRTC = (ably: RealtimePromise | null) => {
   const [isVideoEnabled, setIsVideoEnabled] = useState(true);
   const [isJoining, setIsJoining] = useState(false);
   const [mediaError, setMediaError] = useState<string | null>(null);
+  const [lastCanvasEvent, setLastCanvasEvent] = useState<CanvasEventData | null>(null);
+
 
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const dataChannelRef = useRef<RTCDataChannel | null>(null);
-  const ablyChannelRef = useRef<RealtimeChannelPromise | null>(null);
+  const ablyChannelRef = useRef<Ably.Types.RealtimeChannelPromise | null>(null);
   const earlyIceCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
   
   const setupPeerConnection = useCallback((myClientId: string) => {
@@ -87,8 +85,12 @@ export const useWebRTC = (ably: RealtimePromise | null) => {
   const setupDataChannel = (dc: RTCDataChannel) => {
     dc.onopen = () => console.log('Data channel is open');
     dc.onmessage = (event) => {
-      const receivedMessage = JSON.parse(event.data);
-      setMessages((prev) => [...prev, { ...receivedMessage, sender: 'peer' }]);
+      const data: DataChannelData = JSON.parse(event.data);
+      if (data.type === 'chat') {
+        setMessages((prev) => [...prev, { ...data, sender: 'peer' }]);
+      } else if (data.type === 'draw' || data.type === 'clear' || data.type === 'text') {
+        setLastCanvasEvent(data);
+      }
     };
     dc.onclose = () => console.log('Data channel is closed');
   };
@@ -230,13 +232,34 @@ export const useWebRTC = (ably: RealtimePromise | null) => {
 
   const sendMessage = useCallback((text: string) => {
     if (dataChannelRef.current?.readyState === 'open') {
-      const message: Omit<Message, 'sender'> = {
+      const message: Message = {
+        type: 'chat',
         id: Date.now().toString(),
         text,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        sender: 'me',
       };
       dataChannelRef.current.send(JSON.stringify(message));
       setMessages((prev) => [...prev, { ...message, sender: 'me' }]);
+    }
+  }, []);
+
+  const sendDrawData = useCallback((data: DrawData) => {
+      if (dataChannelRef.current?.readyState === 'open') {
+          dataChannelRef.current.send(JSON.stringify(data));
+      }
+  }, []);
+
+   const sendTextData = useCallback((data: TextData) => {
+      if (dataChannelRef.current?.readyState === 'open') {
+          dataChannelRef.current.send(JSON.stringify(data));
+      }
+  }, []);
+
+  const sendClearCanvas = useCallback(() => {
+    if (dataChannelRef.current?.readyState === 'open') {
+        const data: ClearData = { type: 'clear' };
+        dataChannelRef.current.send(JSON.stringify(data));
     }
   }, []);
 
@@ -283,7 +306,7 @@ export const useWebRTC = (ably: RealtimePromise | null) => {
   }, []);
 
   return {
-    localStream, remoteStream, messages, isConnected, isMuted, isVideoEnabled, isJoining, mediaError,
-    joinRoom, sendMessage, hangUp, toggleMute, toggleVideo,
+    localStream, remoteStream, messages, isConnected, isMuted, isVideoEnabled, isJoining, mediaError, lastCanvasEvent,
+    joinRoom, sendMessage, hangUp, toggleMute, toggleVideo, sendDrawData, sendClearCanvas, sendTextData
   };
 };
