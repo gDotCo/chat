@@ -1,4 +1,3 @@
-
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { Message, SignalingMessage } from '../types';
 
@@ -132,7 +131,6 @@ export const useWebRTC = (ably: RealtimePromise | null) => {
 
   const handleReceivedOffer = useCallback(async (offerSdp: string, myClientId: string) => {
     if (!peerConnectionRef.current || !ablyChannelRef.current) return;
-    await startLocalStream(true, true);
     await peerConnectionRef.current.setRemoteDescription({ type: 'offer', sdp: offerSdp });
 
     for (const candidate of earlyIceCandidatesRef.current) {
@@ -144,7 +142,7 @@ export const useWebRTC = (ably: RealtimePromise | null) => {
     await peerConnectionRef.current.setLocalDescription(answer);
     const message: SignalingMessage = { type: 'answer', sdp: answer.sdp!, from: myClientId };
     await ablyChannelRef.current.publish('webrtc-signal', message);
-  }, [startLocalStream, addIceCandidate]);
+  }, [addIceCandidate]);
 
   const handleReceivedAnswer = useCallback(async (answerSdp: string) => {
     if (!peerConnectionRef.current) return;
@@ -163,9 +161,13 @@ export const useWebRTC = (ably: RealtimePromise | null) => {
     const myClientId = ably.auth.clientId;
     setupPeerConnection(myClientId);
 
+    // Start local media immediately so the user can see themselves.
+    await startLocalStream(true, true);
+
     const channel = ably.channels.get(`p2p-chat:${roomName}`);
     ablyChannelRef.current = channel;
 
+    // Subscribe to signaling messages from peers
     await channel.subscribe('webrtc-signal', (message: { data: SignalingMessage }) => {
       const data = message.data;
       if (data.from === myClientId) return;
@@ -183,20 +185,36 @@ export const useWebRTC = (ably: RealtimePromise | null) => {
       }
     });
 
+    // Handles the case where another user joins AFTER me.
+    channel.presence.subscribe('enter', async (member: { clientId: string }) => {
+        if (member.clientId === myClientId) return; // Ignore my own entry event
+
+        // Tie-breaker logic: peer with smaller ID initiates.
+        if (myClientId < member.clientId) {
+            // Only create an offer if we're not already connecting
+            if (peerConnectionRef.current?.signalingState === 'stable') {
+                console.log(`Peer ${member.clientId} entered. Creating offer.`);
+                await createOffer(myClientId);
+            }
+        }
+    });
+
+    // Announce my presence. This will trigger the 'enter' event for others.
     await channel.presence.enter();
-    const members = await channel.presence.get();
     
-    // Tie-breaker logic to prevent signaling glare
-    if (members.length === 2) {
-      const otherMember = members.find(member => member.clientId !== myClientId);
-      if (otherMember && myClientId < otherMember.clientId) {
-        console.log("I am the designated offerer, creating offer.");
-        await startLocalStream(true, true);
-        await createOffer(myClientId);
-      } else {
-        console.log("I am the designated answerer, waiting for an offer.");
-      }
+    // Handles the case where I join a room where another user is ALREADY present.
+    const members = await channel.presence.get();
+    const otherMember = members.find((member: {clientId: string}) => member.clientId !== myClientId);
+
+    if (otherMember) {
+        if (myClientId < otherMember.clientId) {
+            if (peerConnectionRef.current?.signalingState === 'stable') {
+                console.log(`Peer ${otherMember.clientId} was already present. Creating offer.`);
+                await createOffer(myClientId);
+            }
+        }
     }
+
     setIsJoining(false);
   }, [ably, setupPeerConnection, startLocalStream, createOffer, handleReceivedOffer, handleReceivedAnswer, addIceCandidate]);
 
