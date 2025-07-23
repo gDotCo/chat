@@ -7,3 +7,8 @@ export interface Message {
   sender: 'me' | 'peer';
   timestamp: string;
 }
+
+export type SignalingMessage =
+  | { type: 'offer'; sdp: string; from: string }
+  | { type: 'answer'; sdp: string; from: string }
+  | { type: 'ice-candidate'; candidate: RTCIceCandidateInit; from: string };
