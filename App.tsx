@@ -1,5 +1,7 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
+import * as Ably from 'ably';
+import { Realtime } from 'ably';
 import { useWebRTC } from './hooks/useWebRTC';
 import { View } from './types';
 import { RoomConnector } from './components/ConnectionManager'; // Now imports RoomConnector
@@ -19,13 +21,9 @@ declare global {
   }
 }
 
-// Assuming Ably is loaded from CDN
-declare const Ably: any;
-type RealtimePromise = any;
-
 const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<View>('chat');
-  const [ably, setAbly] = useState<RealtimePromise | null>(null);
+  const [ably, setAbly] = useState< Ably.Realtime | null>(null);
   const [ablyError, setAblyError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -39,7 +37,7 @@ const App: React.FC = () => {
       return;
     }
     
-    const ablyClient = new Ably.Realtime.Promise({
+    const ablyClient = new Realtime({
       key: ABLY_API_KEY,
       clientId: `user-${Math.random().toString(36).substring(2, 9)}`
     });
