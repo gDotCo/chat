@@ -48,7 +48,7 @@ jobs:
 
             # 👇 ADD THIS STEP
       - name: Create 404.html for SPA routing
-        run: cp dist/index.html
+        run: cp dist/index.html dist/404.html
 
       # 5. Deploy the 'dist' folder to the 'gh-pages' branch
       - name: Deploy to GitHub Pages
