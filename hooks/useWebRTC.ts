@@ -12,6 +12,17 @@ const ICE_SERVERS = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
+    // Adding public TURN servers for better NAT/Firewall traversal
+    {
+      urls: 'turn:openrelay.metered.ca:80',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443',
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    }
   ],
 };
 
@@ -175,10 +186,16 @@ export const useWebRTC = (ably: RealtimePromise | null) => {
     await channel.presence.enter();
     const members = await channel.presence.get();
     
+    // Tie-breaker logic to prevent signaling glare
     if (members.length === 2) {
-        console.log("I'm the second to join, creating offer.");
+      const otherMember = members.find(member => member.clientId !== myClientId);
+      if (otherMember && myClientId < otherMember.clientId) {
+        console.log("I am the designated offerer, creating offer.");
         await startLocalStream(true, true);
         await createOffer(myClientId);
+      } else {
+        console.log("I am the designated answerer, waiting for an offer.");
+      }
     }
     setIsJoining(false);
   }, [ably, setupPeerConnection, startLocalStream, createOffer, handleReceivedOffer, handleReceivedAnswer, addIceCandidate]);
