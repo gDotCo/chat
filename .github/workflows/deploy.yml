@@ -46,6 +46,10 @@ jobs:
           VITE_ABLY_KEY: ${{ secrets.ABLY_KEY }}
           BASE_PATH: '/chat/'
 
+            # 👇 ADD THIS STEP
+      - name: Create 404.html for SPA routing
+        run: cp dist/index.html
+
       # 5. Deploy the 'dist' folder to the 'gh-pages' branch
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
