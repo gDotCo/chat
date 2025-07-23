@@ -1,0 +1,53 @@
+# .github/workflows/deploy.yml
+
+name: Deploy to GitHub Pages
+
+# Run this workflow on pushes to the 'main' branch
+on:
+  push:
+    branches:
+      - main
+
+# Specify the permissions the GITHUB_TOKEN will have.
+# This is necessary for the deployment action to work.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      # 1. Checkout your repository code
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 2. Set up Node.js. Using a cached version for speed.
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20' # Or your preferred Node.js version
+          cache: 'npm'
+
+      # 3. Install dependencies using 'npm ci' for faster, more reliable builds
+      - name: Install Dependencies
+        run: npm ci
+
+      # 4. Build the project. 
+      #    This is where we inject the secret as a VITE_ prefixed environment variable.
+      - name: Build
+        run: npm run build
+        env:
+          # The secret from GitHub is passed to the Vite build process
+          VITE_ABLY_KEY: ${{ secrets.ABLY_KEY }}
+          BASE_PATH: '/chat/'
+
+      # 5. Deploy the 'dist' folder to the 'gh-pages' branch
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          # The 'dist' folder is the default build output for Vite
+          publish_dir: ./dist
