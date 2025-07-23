@@ -21,7 +21,7 @@ const App: React.FC = () => {
   useEffect(() => {
     // IMPORTANT: You must create a free Ably account to get an API key
     // and set it as an environment variable named ABLY_API_KEY.
-    const ABLY_API_KEY = process.env.ABLY_KEY;
+    const ABLY_API_KEY = process.env.VITE_ABLY_KEY;
     console.log('ABLY_API_KEY:', ABLY_API_KEY);
 
     if (!ABLY_API_KEY) {
