@@ -43,12 +43,8 @@ jobs:
         run: npm run build
         env:
           # The secret from GitHub is passed to the Vite build process
-          VITE_ABLY_KEY: ${{ secrets.ABLY_KEY }}
+          VITE_ABLY_KEY: ${{ secrets.VITE_ABLY_KEY }}
           BASE_PATH: '/chat/'
-
-            # 👇 ADD THIS STEP
-      - name: Create 404.html for SPA routing
-        run: cp dist/index.html dist/404.html
 
       # 5. Deploy the 'dist' folder to the 'gh-pages' branch
       - name: Deploy to GitHub Pages
