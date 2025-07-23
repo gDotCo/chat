@@ -27,6 +27,7 @@ export const useWebRTC = (ably: RealtimePromise | null) => {
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const dataChannelRef = useRef<RTCDataChannel | null>(null);
   const ablyChannelRef = useRef<RealtimeChannelPromise | null>(null);
+  const earlyIceCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
   
   const setupPeerConnection = useCallback((myClientId: string) => {
     const pc = new RTCPeerConnection(ICE_SERVERS);
@@ -100,25 +101,44 @@ export const useWebRTC = (ably: RealtimePromise | null) => {
     await ablyChannelRef.current.publish('webrtc-signal', message);
   }, []);
 
+  const addIceCandidate = useCallback(async (candidate: RTCIceCandidateInit) => {
+    if (!peerConnectionRef.current) return;
+    if (peerConnectionRef.current.remoteDescription) {
+      try {
+        await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (e) {
+        console.error("Error adding received ICE candidate", e);
+      }
+    } else {
+      earlyIceCandidatesRef.current.push(candidate);
+    }
+  }, []);
+
   const handleReceivedOffer = useCallback(async (offerSdp: string, myClientId: string) => {
     if (!peerConnectionRef.current || !ablyChannelRef.current) return;
     await startLocalStream(true, true);
     await peerConnectionRef.current.setRemoteDescription({ type: 'offer', sdp: offerSdp });
+
+    for (const candidate of earlyIceCandidatesRef.current) {
+        await addIceCandidate(candidate);
+    }
+    earlyIceCandidatesRef.current = [];
+
     const answer = await peerConnectionRef.current.createAnswer();
     await peerConnectionRef.current.setLocalDescription(answer);
     const message: SignalingMessage = { type: 'answer', sdp: answer.sdp!, from: myClientId };
     await ablyChannelRef.current.publish('webrtc-signal', message);
-  }, [startLocalStream]);
+  }, [startLocalStream, addIceCandidate]);
 
   const handleReceivedAnswer = useCallback(async (answerSdp: string) => {
     if (!peerConnectionRef.current) return;
     await peerConnectionRef.current.setRemoteDescription({ type: 'answer', sdp: answerSdp });
-  }, []);
 
-  const addIceCandidate = useCallback(async (candidate: RTCIceCandidateInit) => {
-    if (!peerConnectionRef.current) return;
-    await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(candidate));
-  }, []);
+    for (const candidate of earlyIceCandidatesRef.current) {
+        await addIceCandidate(candidate);
+    }
+    earlyIceCandidatesRef.current = [];
+  }, [addIceCandidate]);
 
   const joinRoom = useCallback(async (roomName: string) => {
     if (!ably) return;
@@ -183,6 +203,7 @@ export const useWebRTC = (ably: RealtimePromise | null) => {
     setIsConnected(false);
     setIsJoining(false);
     setMessages([]);
+    earlyIceCandidatesRef.current = [];
     console.log('Call ended and resources cleaned up.');
   }, [localStream, remoteStream]);
 
