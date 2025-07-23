@@ -1,0 +1,8 @@
+{
+  "name": "P2P Connect",
+  "description": "A peer-to-peer chat application for two people, featuring text chat, voice calls, and video calls using WebRTC. Connect directly and securely with a friend without a server.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
