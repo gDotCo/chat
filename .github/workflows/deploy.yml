@@ -20,6 +20,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    # This job now has access to secrets defined in the 'production' environment
+    environment: production 
     
     steps:
       # 1. Checkout your repository code
