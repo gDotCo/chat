@@ -55,13 +55,18 @@ export const useWebRTC = (ably: RealtimePromise | null) => {
     };
 
     pc.onconnectionstatechange = () => {
-        if (pc.connectionState === 'connected') {
+        const state = pc.connectionState;
+        console.log(`Connection state changed to: ${state}`);
+        if (state === 'connected') {
             setIsConnected(true);
-            console.log('Peer connection established');
-        } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+        } else if (state === 'failed' || state === 'closed') {
             setIsConnected(false);
-            console.log('Peer connection lost');
+            console.log('Peer connection failed or closed.');
             hangUp();
+        } else if (state === 'disconnected') {
+            // This is a temporary state, the browser may try to reconnect automatically.
+            setIsConnected(false); 
+            console.log('Peer connection temporarily disconnected.');
         }
     };
     
