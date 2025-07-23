@@ -18,6 +18,8 @@ permissions:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     
     steps:
       # 1. Checkout your repository code
