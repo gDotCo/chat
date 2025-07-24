@@ -1,5 +1,4 @@
 
-
 import { useState, useRef, useCallback, useEffect } from 'react';
 import Ably from 'ably';
 import { Message, SignalingMessage, DataChannelData, DrawData, ClearData, TextData, CanvasEventData } from '../types';
@@ -38,6 +37,7 @@ export const useWebRTC = (ably: Ably.Realtime | null, username: string, roomName
   const dataChannelRef = useRef<RTCDataChannel | null>(null);
   const ablyChannelRef = useRef<Ably.RealtimeChannel | null>(null);
   const earlyIceCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
+  const isConnectingRef = useRef(false);
 
   const fetchHistory = useCallback(async () => {
     if (!username) return;
@@ -78,6 +78,7 @@ export const useWebRTC = (ably: Ably.Realtime | null, username: string, roomName
     remoteStream?.getTracks().forEach(track => track.stop());
     setRemoteStream(null);
     setIsConnected(false);
+    isConnectingRef.current = false;
     earlyIceCandidatesRef.current = [];
   }, [remoteStream]);
 
@@ -93,6 +94,7 @@ export const useWebRTC = (ably: Ably.Realtime | null, username: string, roomName
     setLocalStream(null);
     setHasJoinedRoom(false);
     setIsJoining(false);
+    isConnectingRef.current = false;
     setMessages([]);
     setMediaError(null);
     console.log('Call ended and resources cleaned up.');
@@ -112,7 +114,6 @@ export const useWebRTC = (ably: Ably.Realtime | null, username: string, roomName
   }, []);
 
   const setupPeerConnection = useCallback((stream: MediaStream | null) => {
-    // Reset any existing connection before creating a new one.
     resetPeerConnection();
 
     const pc = new RTCPeerConnection(ICE_SERVERS);
@@ -138,12 +139,20 @@ export const useWebRTC = (ably: Ably.Realtime | null, username: string, roomName
     pc.onconnectionstatechange = () => {
       const state = pc.connectionState;
       console.log(`Connection state changed to: ${state}`);
-      if (state === 'connected') {
-        setIsJoining(false);
-        setIsConnected(true);
-      } else if (state === 'failed' || state === 'closed') {
-        console.log(`Peer connection is ${state}. Resetting.`);
-        resetPeerConnection();
+      switch (state) {
+        case 'connected':
+          setIsJoining(false);
+          setIsConnected(true);
+          isConnectingRef.current = false;
+          break;
+        case 'disconnected':
+          console.log('Peer connection disconnected. Waiting for reconnection...');
+          break;
+        case 'failed':
+        case 'closed':
+          console.log(`Peer connection is ${state}. Resetting.`);
+          resetPeerConnection();
+          break;
       }
     };
 
@@ -156,7 +165,6 @@ export const useWebRTC = (ably: Ably.Realtime | null, username: string, roomName
   }, [resetPeerConnection, setupDataChannel, ably]);
 
   const startLocalStream = useCallback(async (video: boolean, audio: boolean) => {
-    // If stream already exists, do nothing.
     if (localStream) return localStream;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video, audio });
@@ -237,9 +245,10 @@ export const useWebRTC = (ably: Ably.Realtime | null, username: string, roomName
   }, [ably, hasJoinedRoom, fetchHistory]);
 
   const initiateCall = useCallback(async () => {
-    if (!ably || peerConnectionRef.current) return;
+    if (!ably) return;
 
     console.log('Initiating call...');
+    isConnectingRef.current = true;
     setIsJoining(true);
 
     const stream = await startLocalStream(true, true);
@@ -251,9 +260,13 @@ export const useWebRTC = (ably: Ably.Realtime | null, username: string, roomName
   }, [ably, startLocalStream, setupPeerConnection, createOffer]);
 
   const answerCall = useCallback(async (offerSdp: string) => {
-    if (!ably || peerConnectionRef.current) return;
+    if (!ably || isConnectingRef.current || peerConnectionRef.current) {
+      console.warn('Received an offer while already connecting/connected. Ignoring.');
+      return;
+    }
 
     console.log('Received offer, preparing to answer...');
+    isConnectingRef.current = true;
     setIsJoining(true);
 
     const stream = await startLocalStream(true, true);
@@ -286,6 +299,10 @@ export const useWebRTC = (ably: Ably.Realtime | null, username: string, roomName
     channel.subscribe('webrtc-signal', signalSubscriber);
 
     const initiateCallIfMyTurn = (peerClientId: string) => {
+      if (isConnectingRef.current || peerConnectionRef.current) {
+        console.log("Ignoring connection trigger: already connecting or connected.");
+        return;
+      }
       if (myClientId > peerClientId) {
         console.log(`My ID (${myClientId}) is greater than peer's (${peerClientId}). Initiating call.`);
         initiateCall();
@@ -301,14 +318,17 @@ export const useWebRTC = (ably: Ably.Realtime | null, username: string, roomName
     channel.presence.subscribe('enter', presenceEnterSubscriber);
 
     const leaveSubscriber = (member: Ably.PresenceMessage) => {
-      if (member.clientId !== myClientId) {
-        console.log('Peer left, resetting connection.');
+      // Only reset if the peer leaves AND we were actually in a stable, connected call.
+      // Do not reset during the fragile handshaking process.
+      if (member.clientId !== myClientId && isConnected) {
+        console.log('Connected peer left, resetting connection.');
         resetPeerConnection();
+      } else {
+        console.log(`Ignoring leave event from ${member.clientId} because a stable connection is not established.`);
       }
     };
     channel.presence.subscribe('leave', leaveSubscriber);
 
-    // Check for members already in the room when we join
     channel.presence.get().then((presentMembers) => {
       const peer = presentMembers.find(member => member.clientId !== myClientId);
       if (peer) {
@@ -316,7 +336,6 @@ export const useWebRTC = (ably: Ably.Realtime | null, username: string, roomName
       }
     });
 
-    // Announce our arrival via presence.
     channel.presence.enter();
 
     return () => {
@@ -325,7 +344,7 @@ export const useWebRTC = (ably: Ably.Realtime | null, username: string, roomName
       channel.presence.unsubscribe('leave', leaveSubscriber);
       channel.presence.leave();
     }
-  }, [hasJoinedRoom, ably, roomName, initiateCall, answerCall, handleReceivedAnswer, addIceCandidate, resetPeerConnection]);
+  }, [hasJoinedRoom, ably, roomName, isConnected, initiateCall, answerCall, handleReceivedAnswer, addIceCandidate, resetPeerConnection]);
 
 
   const sendMessage = useCallback((text: string) => {
@@ -336,7 +355,7 @@ export const useWebRTC = (ably: Ably.Realtime | null, username: string, roomName
       id: Date.now().toString(),
       text,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      sender: 'me',
+      sender: username,
     };
 
     setMessages((prev) => [...prev, message]);

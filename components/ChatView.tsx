@@ -27,6 +27,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ messages, sendMessage, usern
       setInput('');
     }
   };
+  console.log('username', username);
 
   return (
     <div className="flex flex-col h-full bg-dark-surface rounded-b-lg">
