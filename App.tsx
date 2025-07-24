@@ -1,7 +1,7 @@
 
 
 import React, { useState, useMemo, useEffect } from 'react';
-import Ably, { Realtime } from 'ably';
+import Ably, {Realtime} from 'ably';
 import { useWebRTC } from './hooks/useWebRTC';
 import { View } from './types';
 import { RoomConnector } from './components/ConnectionManager';
@@ -14,16 +14,17 @@ import { ICON_PATHS } from './constants';
 
 const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<View>('chat');
-  const [ably, setAbly] = useState<Realtime | null>(null);
+  const [ably, setAbly] = useState<Ably.Realtime | null>(null);
   const [ablyError, setAblyError] = useState<string | null>(null);
+  const [username, setUsername] = useState<string>('');
 
   useEffect(() => {
     // Vite injects environment variables here.
     // This will be replaced by your GitHub Secret during the build process.
     const ABLY_API_KEY = import.meta.env.VITE_ABLY_KEY;
 
-    if (!ABLY_API_KEY ) {
-      setAblyError("Ably API Key not found. Ensure VITE_ABLY_API_KEY is set in your environment or GitHub Secrets.");
+    if (!ABLY_API_KEY) {
+      setAblyError("Ably API Key not found. Ensure VITE_ABLY_KEY is set in your environment or GitHub Secrets.");
       return;
     }
     
@@ -37,8 +38,8 @@ const App: React.FC = () => {
       setAblyError(null);
     });
     
-    ablyClient.connection.on('failed', (error: any) => {
-        setAblyError(`Ably connection failed: ${error.reason}`);
+    ablyClient.connection.on('failed', (stateChange: Ably.ConnectionStateChange) => {
+        setAblyError(`Ably connection failed: ${stateChange.reason?.message ?? 'Unknown error'}`);
     });
 
     return () => {
@@ -49,15 +50,16 @@ const App: React.FC = () => {
   const {
     localStream, remoteStream, messages, isConnected, isMuted, isVideoEnabled, isJoining, mediaError, lastCanvasEvent,
     joinRoom, sendMessage, hangUp, toggleMute, toggleVideo, sendDrawData, sendClearCanvas, sendTextData
-  } = useWebRTC(ably);
+  } = useWebRTC(ably, username);
 
   const handleHangUp = () => {
     hangUp();
     setCurrentView('chat');
   };
   
-  const handleJoinRoom = (roomName: string) => {
+  const handleJoinRoom = (roomName: string, newUsername: string) => {
       if(ably) {
+          setUsername(newUsername);
           joinRoom(roomName);
       }
   }
@@ -110,7 +112,7 @@ const App: React.FC = () => {
         );
       case 'chat':
       default:
-        return <ChatView messages={messages} sendMessage={sendMessage} />;
+        return <ChatView messages={messages} sendMessage={sendMessage} username={username}/>;
     }
   }, [ably, ablyError, isConnected, isJoining, currentView, localStream, remoteStream, isMuted, isVideoEnabled, toggleMute, toggleVideo, handleHangUp, messages, sendMessage, handleJoinRoom, mediaError, lastCanvasEvent, sendDrawData, sendClearCanvas, sendTextData]);
 

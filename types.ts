@@ -5,7 +5,7 @@ export interface Message {
   type: 'chat';
   id: string;
   text: string;
-  sender: 'me' | 'peer';
+  sender: string;
   timestamp: string;
 }
 

@@ -4,17 +4,17 @@ import Icon from './Icon';
 import { ICON_PATHS } from '../constants';
 
 interface RoomConnectorProps {
-  onJoin: (roomName: string) => void;
+  onJoin: (roomName: string, userName: string) => void;
   isJoining: boolean;
 }
 
 export const RoomConnector: React.FC<RoomConnectorProps> = ({ onJoin, isJoining }) => {
-  const [roomName, setRoomName] = useState('');
-
+  const [roomName, setRoomName] = useState('Queenofmissuniverse');
+  const [userName, setUserName] = useState('uuu');
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (roomName.trim() && !isJoining) {
-      onJoin(roomName.trim());
+      onJoin(roomName.trim(), userName);
     }
   };
 
@@ -36,6 +36,20 @@ export const RoomConnector: React.FC<RoomConnectorProps> = ({ onJoin, isJoining 
         />
         <button
           type="submit"
+          onClick={() => setUserName('uuu')}
+          className="w-50 bg-gray-600 hover:bg-gray-700 text-white font-bold py-3 px-4 rounded-lg transition-colors"
+        >
+          uuu
+        </button>
+                <button
+         type="submit"
+          onClick={() => setUserName('g11h')}
+          className="w-50 bg-gray-600 hover:bg-gray-700 text-white font-bold py-3 px-4 rounded-lg transition-colors"
+        >
+          g11h
+        </button>
+        {/* <button
+          type="submit"
           disabled={isJoining || !roomName.trim()}
           className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg transition-colors disabled:bg-gray-500 disabled:cursor-not-allowed flex items-center justify-center gap-2"
         >
@@ -50,7 +64,7 @@ export const RoomConnector: React.FC<RoomConnectorProps> = ({ onJoin, isJoining 
           ) : (
             'Join Room'
           )}
-        </button>
+        </button> */}
       </form>
     </div>
   );

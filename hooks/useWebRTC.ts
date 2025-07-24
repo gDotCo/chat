@@ -1,8 +1,8 @@
 
-import { useState, useRef, useCallback, useEffect } from 'react';
-import Ably, { Realtime } from 'ably';
-import { Message, SignalingMessage, DataChannelData, DrawData, ClearData, TextData, CanvasEventData } from '../types';
 
+import { useState, useRef, useCallback, useEffect } from 'react';
+import * as Ably from 'ably';
+import { Message, SignalingMessage, DataChannelData, DrawData, ClearData, TextData, CanvasEventData } from '../types';
 const API_HOST = import.meta.env.VITE_API_HOST || '';
 console.log('API_HOST:', API_HOST);
 
@@ -23,7 +23,7 @@ const ICE_SERVERS = {
   ],
 };
 
-export const useWebRTC = (ably: Realtime | null) => {
+export const useWebRTC = (ably: Ably.Realtime | null, username: string) => {
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -43,20 +43,20 @@ export const useWebRTC = (ably: Realtime | null) => {
     try {
         const response = await fetch(`${API_HOST}/api/data?limit=50&page=1`);
         if (!response.ok) {
-            console.warn(`Failed to fetch message history: ${response.status}`);
+            console.error(`Failed to fetch message history: ${response.status}`);
             return;
         }
         const historyData = await response.json();
-        if (!Array.isArray(historyData?.items)) {
-            console.warn('Fetched history is not an array.');
+        if (!historyData || !Array.isArray(historyData.items)) {
+            console.warn('Fetched history does not contain an items array.');
             return;
         }
         
-        const fetchedMessages: Message[] = historyData?.items.map((item: any): Message => ({
+        const fetchedMessages: Message[] = historyData.items.map((item: any): Message => ({
             type: 'chat',
             id: String(item.id || `history-${Math.random()}`),
             text: item.message || '',
-            sender: item.username === 'test' ? 'me' : 'peer',
+            sender: item.username,
             timestamp: item.timestamp ? new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
         })).reverse(); // API likely returns newest first, chat shows oldest first.
 
@@ -68,7 +68,7 @@ export const useWebRTC = (ably: Realtime | null) => {
       } catch (error) {
         console.error('Error fetching message history:', error);
       }
-  }, []);
+  }, [username]);
 
   const hangUp = useCallback(() => {
     ablyChannelRef.current?.presence.leave();
@@ -228,7 +228,7 @@ export const useWebRTC = (ably: Realtime | null) => {
     const channel = ably.channels.get(`p2p-chat:${roomName}`);
     ablyChannelRef.current = channel;
 
-    await channel.subscribe('webrtc-signal', (message: Ably.Types.Message) => {
+    await channel.subscribe('webrtc-signal', (message: Ably.Message) => {
       const data = message.data as SignalingMessage;
       if (!data || data.from === myClientId) return;
 
@@ -279,15 +279,15 @@ export const useWebRTC = (ably: Realtime | null) => {
         id: Date.now().toString(),
         text,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        sender: 'me',
+        sender: username,
       };
       dataChannelRef.current.send(JSON.stringify(message));
-      setMessages((prev) => [...prev, { ...message, sender: 'me' }]);
+      setMessages((prev) => [...prev, { ...message, sender: username }]);
       
       const saveData = async () => {
         try {
             const payload = {
-                username: 'uuu',
+                username: username,
                 imageUrl: null,
                 replyingTo: null,
                 message: text,
@@ -311,7 +311,7 @@ export const useWebRTC = (ably: Realtime | null) => {
       };
       saveData();
     }
-  }, []);
+  }, [username]);
 
   const sendDrawData = useCallback((data: DrawData) => {
       if (dataChannelRef.current?.readyState === 'open') {
@@ -353,7 +353,7 @@ export const useWebRTC = (ably: Realtime | null) => {
   
   useEffect(() => {
     return () => hangUp();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return {
