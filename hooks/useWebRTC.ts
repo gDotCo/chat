@@ -62,7 +62,7 @@ export const useWebRTC = (
     if (!username || isFetchingHistory || !hasMoreMessages) return;
     setIsFetchingHistory(true);
     try {
-        const response = await fetch(`${import.meta.env.VITE_API_URL}/api/data?limit=50&page=${page}&user=${username}`);
+        const response = await fetch(`${import.meta.env.VITE_API_HOST}/api/data?limit=50&page=${page}&user=${username}`);
       if (!response.ok) throw new Error(`Failed to fetch message history: ${response.status}`);
       const historyData = await response.json();
         
