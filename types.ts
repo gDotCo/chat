@@ -7,37 +7,50 @@ export interface Message {
   text: string;
   username: string;
   timestamp: string;
+  reactions?: { [emoji: string]: string[] }; // emoji: username[]
+  replyingTo?: {
+    id: string;
+    text: string;
+    username: string;
+  }
 }
 
 export type Tool = 'pen' | 'eraser' | 'text';
 
 export interface DrawData {
-    type: 'draw';
-    tool: 'pen' | 'eraser';
-    x0: number;
-    y0: number;
-    x1: number;
-    y1: number;
-    color: string;
-    lineWidth: number;
+  type: 'draw';
+  tool: 'pen' | 'eraser';
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+  color: string;
+  lineWidth: number;
 }
 
 export interface TextData {
-    type: 'text';
-    x: number;
-    y: number;
-    text: string;
-    color: string;
-    font: string;
+  type: 'text';
+  x: number;
+  y: number;
+  text: string;
+  color: string;
+  font: string;
 }
 
 export interface ClearData {
-    type: 'clear';
+  type: 'clear';
+}
+
+export interface ReactionData {
+  type: 'reaction';
+  messageId: string;
+  emoji: string;
+  username: string;
 }
 
 export type CanvasEventData = DrawData | TextData | ClearData;
 
-export type DataChannelData = Message | CanvasEventData;
+export type DataChannelData = Message | CanvasEventData | ReactionData;
 
 export type SignalingMessage =
   | { type: 'offer'; sdp: string; from: string; callType: View }

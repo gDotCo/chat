@@ -1,8 +1,7 @@
 
-
 import { useState, useRef, useCallback, useEffect } from 'react';
 import Ably from 'ably';
-import { Message, SignalingMessage, DataChannelData, CanvasEventData, View, DrawData, TextData, ClearData } from '../types';
+import { Message, SignalingMessage, DataChannelData, CanvasEventData, View, DrawData, TextData, ClearData, ReactionData } from '../types';
 
 const ICE_SERVERS = {
   iceServers: [
@@ -58,18 +57,36 @@ export const useWebRTC = (
   const fetchHistory = useCallback(async () => {
     if (!username) return;
     try {
-      const response = await fetch(`/api/data?limit=50&page=1`);
+      const response = await fetch(`/api/data?limit=200&page=1`);
       if (!response.ok) throw new Error(`Failed to fetch message history: ${response.status}`);
       const historyData = await response.json();
       if (!historyData || !Array.isArray(historyData.items)) return;
 
-      const fetchedMessages: Message[] = historyData.items.map((item: any): Message => ({
+      const historyItems = historyData.items;
+
+      const fetchedMessages: Message[] = historyItems.map((item: any): Message => {
+        let replyingTo: Message['replyingTo'] | undefined = undefined;
+        if (item.replyingTo) {
+          const repliedToMessage = historyItems.find(h => String(h.id) === String(item.replyingTo));
+          if (repliedToMessage) {
+            replyingTo = {
+              id: String(repliedToMessage.id),
+              text: repliedToMessage.message,
+              username: repliedToMessage.username,
+            };
+          }
+        }
+
+        return {
         type: 'chat',
         id: String(item.id || `history-${Math.random()}`),
         text: item.message || '',
         username: item.username,
         timestamp: item.timestamp ? new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
-      })).reverse();
+          replyingTo: replyingTo,
+          reactions: {}, // Reactions are not persisted
+        };
+      }).reverse();
 
       setMessages(prev => {
         const existingIds = new Set(prev.map(m => m.id));
@@ -125,19 +142,44 @@ export const useWebRTC = (
     setMediaError(null);
   }, [localStream, resetLocalState]);
 
+  const handleReaction = useCallback((messageId: string, emoji: string, reactorUsername: string) => {
+    setMessages(prevMessages =>
+      prevMessages.map(msg => {
+        if (msg.id !== messageId) return msg;
+
+        const newReactions = { ...(msg.reactions || {}) };
+        const reactors = newReactions[emoji] || [];
+
+        if (reactors.includes(reactorUsername)) {
+          // User is removing their reaction
+          newReactions[emoji] = reactors.filter(u => u !== reactorUsername);
+          if (newReactions[emoji].length === 0) {
+            delete newReactions[emoji];
+          }
+        } else {
+          // User is adding a reaction
+          newReactions[emoji] = [...reactors, reactorUsername];
+        }
+        return { ...msg, reactions: newReactions };
+      })
+    );
+  }, []);
+
   const setupDataChannel = useCallback((dc: RTCDataChannel) => {
     dc.onopen = () => console.log('Data channel is open');
     dc.onmessage = (event) => {
       const data: DataChannelData = JSON.parse(event.data);
       if (data.type === 'chat') {
-        setMessages((prev) => [...prev, { ...data, sender: 'peer' }]);
+        setMessages((prev) => [...prev, { ...data}]);
+      } else if (data.type === 'reaction') {
+        handleReaction(data.messageId, data.emoji, data.username);
       } else if (data.type === 'draw' || data.type === 'clear' || data.type === 'text') {
         setLastCanvasEvent(data);
       }
     };
     dc.onclose = () => console.log('Data channel is closed');
     dataChannelRef.current = dc;
-  }, []);
+  }, [handleReaction]);
 
   const setupPeerConnection = useCallback((stream: MediaStream | null) => {
     resetConnectionState();
@@ -222,7 +264,8 @@ export const useWebRTC = (
     if (!ably || callStateRef.current !== 'idle') return;
     setCallState('outgoing');
     activeCallTypeRef.current = callType;
-    const stream = await startLocalStream(true, true);
+    const needsMedia = callType === 'video' || callType === 'voice';
+    const stream = needsMedia ? await startLocalStream(callType === 'video', true) : null;
     const pc = setupPeerConnection(stream);
     const dc = pc.createDataChannel('chat');
     setupDataChannel(dc);
@@ -237,8 +280,9 @@ export const useWebRTC = (
 
     const offerSdp = offerSdpRef.current;
     const callType = incomingCallInfo.callType;
+    const needsMedia = callType === 'video' || callType === 'voice';
 
-    const stream = await startLocalStream(true, true);
+    const stream = needsMedia ? await startLocalStream(callType === 'video', true) : null;
     const pc = setupPeerConnection(stream);
 
     await pc.setRemoteDescription({ type: 'offer', sdp: offerSdp });
@@ -288,7 +332,7 @@ export const useWebRTC = (
       const data = message.data as SignalingMessage;
       if (!data || data.from === myClientId) return;
 
-        switch(data.type) {
+      switch (data.type) {
         case 'offer':
           if (callStateRef.current !== 'idle') return;
           offerSdpRef.current = data.sdp;
@@ -311,18 +355,11 @@ export const useWebRTC = (
         setIsPeerPresent(true);
       } else if (member.action === 'leave') {
         setIsPeerPresent(false);
-        // If we have an incoming call from the peer who just left, reset our state.
         if (callStateRef.current === 'incoming' && incomingCallInfo?.from === member.clientId) {
-          console.log('Caller left before call was accepted. Resetting.');
           resetLocalState();
           return;
         }
-
-        // Only reset the connection if it was fully established.
-        // This prevents a presence flicker during the 'outgoing' state from
-        // tearing down the connection attempt.
         if (peerConnectionRef.current && peerConnectionRef.current.connectionState === 'connected') {
-          console.log('Connected peer left. Resetting connection.');
           resetLocalState();
         }
       }
@@ -342,19 +379,48 @@ export const useWebRTC = (
     }
   }, [hasJoinedRoom, ably, roomName, handleReceivedAnswer, addIceCandidate, resetLocalState, incomingCallInfo]);
 
-  const sendMessage = useCallback((text: string) => {
+  const sendMessage = useCallback((text: string, replyingToId?: string) => {
     if (!username) return;
-    const message: Message = { type: 'chat', id: Date.now().toString(), text, username, timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) };
-    setMessages((prev) => [...prev, message]);
-    if (dataChannelRef.current?.readyState === 'open') {
-      dataChannelRef.current.send(JSON.stringify({ ...message, username: username === 'uuu' ? 'g11h' : 'uuu' })); // Adjust sender based on username
+
+    let replyingTo: Message['replyingTo'] | undefined = undefined;
+    if (replyingToId) {
+      const originalMessage = messages.find(m => m.id === replyingToId);
+      if (originalMessage) {
+        replyingTo = {
+          id: originalMessage.id,
+          text: originalMessage.text,
+          username: originalMessage.username,
+        };
+      }
     }
+
+    const message: Message = { type: 'chat', id: Date.now().toString(), text, username, timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), replyingTo };
+    setMessages((prev) => [...prev, message]);
+
+    if (dataChannelRef.current?.readyState === 'open') {
+      dataChannelRef.current.send(JSON.stringify({ ...message }));
+    }
+
     fetch(`${import.meta.env.VITE_API_HOST || ''}/api/data`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, imageUrl: null, replyingTo: null, message: text }),
+      body: JSON.stringify({ username, imageUrl: null, replyingTo: replyingToId || null, message: text }),
     }).catch(error => console.error('Failed to save message to server:', error));
-  }, [username]);
+  }, [username, messages]);
+
+  const sendReaction = useCallback((messageId: string, emoji: string) => {
+    if (!username) return;
+    handleReaction(messageId, emoji, username);
+    if (dataChannelRef.current?.readyState === 'open') {
+      const reactionData: ReactionData = { type: 'reaction', messageId, emoji, username };
+      dataChannelRef.current.send(JSON.stringify(reactionData));
+    }
+     fetch(`${import.meta.env.VITE_API_HOST || ''}/api/data/${messageId}/reactions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, emoji }),
+      }).catch(error => console.error('Failed to save message to server:', error));
+  }, [username, handleReaction]);
 
   const sendDrawData = useCallback((data: DrawData) => { if (dataChannelRef.current?.readyState === 'open') dataChannelRef.current.send(JSON.stringify(data)); }, []);
   const sendTextData = useCallback((data: TextData) => { if (dataChannelRef.current?.readyState === 'open') dataChannelRef.current.send(JSON.stringify(data)); }, []);
@@ -372,6 +438,6 @@ export const useWebRTC = (
     localStream, remoteStream, messages, hasJoinedRoom, isConnected, isMuted, isVideoEnabled, mediaError, lastCanvasEvent,
     isPeerPresent, callState, incomingCallInfo,
     startCall, sendMessage, hangUp, toggleMute, toggleVideo, sendDrawData, sendClearCanvas, sendTextData,
-    acceptCall, rejectCall, cancelCall
+    acceptCall, rejectCall, cancelCall, sendReaction
   };
 };
