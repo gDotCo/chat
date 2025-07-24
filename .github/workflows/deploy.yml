@@ -47,6 +47,7 @@ jobs:
           # The secret from GitHub is passed to the Vite build process
           VITE_ABLY_KEY: ${{ secrets.VITE_ABLY_KEY }}
           BASE_PATH: '/chat/'
+          VITE_API_HOST: ${{ env.VITE_API_HOST || '' }}
 
       # 5. Deploy the 'dist' folder to the 'gh-pages' branch
       - name: Deploy to GitHub Pages

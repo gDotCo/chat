@@ -1,13 +1,15 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { Realtime } from 'ably';
+import Ably, { Realtime } from 'ably';
 import { Message, SignalingMessage, DataChannelData, DrawData, ClearData, TextData, CanvasEventData } from '../types';
+
+const API_HOST = import.meta.env.VITE_API_HOST || '';
+console.log('API_HOST:', API_HOST);
 
 const ICE_SERVERS = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
-    // Adding public TURN servers for better NAT/Firewall traversal
     {
       urls: 'turn:openrelay.metered.ca:80',
       username: 'openrelayproject',
@@ -32,12 +34,73 @@ export const useWebRTC = (ably: Realtime | null) => {
   const [mediaError, setMediaError] = useState<string | null>(null);
   const [lastCanvasEvent, setLastCanvasEvent] = useState<CanvasEventData | null>(null);
 
-
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const dataChannelRef = useRef<RTCDataChannel | null>(null);
-  const ablyChannelRef = useRef<Ably.Types.RealtimeChannelPromise | null>(null);
+  const ablyChannelRef = useRef<Ably.RealtimeChannel | null>(null);
   const earlyIceCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
-  
+
+  const fetchHistory = useCallback(async () => {
+    try {
+        const response = await fetch(`${API_HOST}/api/data?limit=50&page=1`);
+        if (!response.ok) {
+            console.warn(`Failed to fetch message history: ${response.status}`);
+            return;
+        }
+        const historyData = await response.json();
+        if (!Array.isArray(historyData?.items)) {
+            console.warn('Fetched history is not an array.');
+            return;
+        }
+        
+        const fetchedMessages: Message[] = historyData?.items.map((item: any): Message => ({
+            type: 'chat',
+            id: String(item.id || `history-${Math.random()}`),
+            text: item.message || '',
+            sender: item.username === 'test' ? 'me' : 'peer',
+            timestamp: item.timestamp ? new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
+        })).reverse(); // API likely returns newest first, chat shows oldest first.
+
+        setMessages(prev => {
+            const existingIds = new Set(prev.map(m => m.id));
+            const newMessages = fetchedMessages.filter(m => !existingIds.has(m.id));
+            return [...newMessages, ...prev];
+        });
+      } catch (error) {
+        console.error('Error fetching message history:', error);
+      }
+  }, []);
+
+  const hangUp = useCallback(() => {
+    ablyChannelRef.current?.presence.leave();
+    ablyChannelRef.current?.unsubscribe();
+    ablyChannelRef.current = null;
+    peerConnectionRef.current?.close();
+    localStream?.getTracks().forEach(track => track.stop());
+    remoteStream?.getTracks().forEach(track => track.stop());
+    peerConnectionRef.current = null;
+    setLocalStream(null);
+    setRemoteStream(null);
+    setIsConnected(false);
+    setIsJoining(false);
+    setMessages([]);
+    setMediaError(null);
+    earlyIceCandidatesRef.current = [];
+    console.log('Call ended and resources cleaned up.');
+  }, [localStream, remoteStream]);
+
+  const setupDataChannel = useCallback((dc: RTCDataChannel) => {
+    dc.onopen = () => console.log('Data channel is open');
+    dc.onmessage = (event) => {
+      const data: DataChannelData = JSON.parse(event.data);
+      if (data.type === 'chat') {
+        setMessages((prev) => [...prev, { ...data, sender: 'peer' }]);
+      } else if (data.type === 'draw' || data.type === 'clear' || data.type === 'text') {
+        setLastCanvasEvent(data);
+      }
+    };
+    dc.onclose = () => console.log('Data channel is closed');
+  }, []);
+
   const setupPeerConnection = useCallback((myClientId: string) => {
     const pc = new RTCPeerConnection(ICE_SERVERS);
 
@@ -68,33 +131,20 @@ export const useWebRTC = (ably: Realtime | null) => {
         console.log(`Connection state changed to: ${state}`);
         if (state === 'connected') {
             setIsConnected(true);
+            fetchHistory();
         } else if (state === 'failed' || state === 'closed') {
             setIsConnected(false);
             console.log('Peer connection failed or closed.');
             hangUp();
         } else if (state === 'disconnected') {
-            // This is a temporary state, the browser may try to reconnect automatically.
             setIsConnected(false); 
             console.log('Peer connection temporarily disconnected.');
         }
     };
     
     peerConnectionRef.current = pc;
-  }, []);
-
-  const setupDataChannel = (dc: RTCDataChannel) => {
-    dc.onopen = () => console.log('Data channel is open');
-    dc.onmessage = (event) => {
-      const data: DataChannelData = JSON.parse(event.data);
-      if (data.type === 'chat') {
-        setMessages((prev) => [...prev, { ...data, sender: 'peer' }]);
-      } else if (data.type === 'draw' || data.type === 'clear' || data.type === 'text') {
-        setLastCanvasEvent(data);
-      }
-    };
-    dc.onclose = () => console.log('Data channel is closed');
-  };
-
+  }, [fetchHistory, hangUp, setupDataChannel]);
+  
   const startLocalStream = useCallback(async (video: boolean, audio: boolean) => {
     if (!peerConnectionRef.current) return null;
     try {
@@ -117,17 +167,7 @@ export const useWebRTC = (ably: Realtime | null) => {
       return null;
     }
   }, []);
-
-  const createOffer = useCallback(async (myClientId: string) => {
-    if (!peerConnectionRef.current || !ablyChannelRef.current) return;
-    dataChannelRef.current = peerConnectionRef.current.createDataChannel('chat');
-    setupDataChannel(dataChannelRef.current);
-    const offer = await peerConnectionRef.current.createOffer();
-    await peerConnectionRef.current.setLocalDescription(offer);
-    const message: SignalingMessage = { type: 'offer', sdp: offer.sdp!, from: myClientId };
-    await ablyChannelRef.current.publish('webrtc-signal', message);
-  }, []);
-
+  
   const addIceCandidate = useCallback(async (candidate: RTCIceCandidateInit) => {
     if (!peerConnectionRef.current) return;
     if (peerConnectionRef.current.remoteDescription) {
@@ -140,6 +180,16 @@ export const useWebRTC = (ably: Realtime | null) => {
       earlyIceCandidatesRef.current.push(candidate);
     }
   }, []);
+
+  const createOffer = useCallback(async (myClientId: string) => {
+    if (!peerConnectionRef.current || !ablyChannelRef.current) return;
+    dataChannelRef.current = peerConnectionRef.current.createDataChannel('chat');
+    setupDataChannel(dataChannelRef.current);
+    const offer = await peerConnectionRef.current.createOffer();
+    await peerConnectionRef.current.setLocalDescription(offer);
+    const message: SignalingMessage = { type: 'offer', sdp: offer.sdp!, from: myClientId };
+    await ablyChannelRef.current.publish('webrtc-signal', message);
+  }, [setupDataChannel]);
 
   const handleReceivedOffer = useCallback(async (offerSdp: string, myClientId: string) => {
     if (!peerConnectionRef.current || !ablyChannelRef.current) return;
@@ -173,16 +223,14 @@ export const useWebRTC = (ably: Realtime | null) => {
     const myClientId = ably.auth.clientId;
     setupPeerConnection(myClientId);
 
-    // Attempt to start local media. This will set mediaError on failure but not crash.
     await startLocalStream(true, true);
 
     const channel = ably.channels.get(`p2p-chat:${roomName}`);
     ablyChannelRef.current = channel;
 
-    // Subscribe to signaling messages from peers
-    await channel.subscribe('webrtc-signal', (message: { data: SignalingMessage }) => {
-      const data = message.data;
-      if (data.from === myClientId) return;
+    await channel.subscribe('webrtc-signal', (message: Ably.Types.Message) => {
+      const data = message.data as SignalingMessage;
+      if (!data || data.from === myClientId) return;
 
       switch(data.type) {
         case 'offer':
@@ -197,13 +245,9 @@ export const useWebRTC = (ably: Realtime | null) => {
       }
     });
 
-    // Handles the case where another user joins AFTER me.
     channel.presence.subscribe('enter', async (member: { clientId: string }) => {
-        if (member.clientId === myClientId) return; // Ignore my own entry event
-
-        // Tie-breaker logic: peer with smaller ID initiates.
+        if (member.clientId === myClientId) return;
         if (myClientId < member.clientId) {
-            // Only create an offer if we're not already connecting
             if (peerConnectionRef.current?.signalingState === 'stable') {
                 console.log(`Peer ${member.clientId} entered. Creating offer.`);
                 await createOffer(myClientId);
@@ -211,10 +255,8 @@ export const useWebRTC = (ably: Realtime | null) => {
         }
     });
 
-    // Announce my presence. This will trigger the 'enter' event for others.
     await channel.presence.enter();
     
-    // Handles the case where I join a room where another user is ALREADY present.
     const members = await channel.presence.get();
     const otherMember = members.find((member: {clientId: string}) => member.clientId !== myClientId);
 
@@ -241,6 +283,33 @@ export const useWebRTC = (ably: Realtime | null) => {
       };
       dataChannelRef.current.send(JSON.stringify(message));
       setMessages((prev) => [...prev, { ...message, sender: 'me' }]);
+      
+      const saveData = async () => {
+        try {
+            const payload = {
+                username: 'uuu',
+                imageUrl: null,
+                replyingTo: null,
+                message: text,
+            };
+            const response = await fetch(`${API_HOST}/api/data`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(payload),
+            });
+
+            if (!response.ok) {
+                throw new Error(`Server responded with ${response.status}`);
+            }
+            console.log('Message saved to server.');
+
+        } catch (error) {
+            console.error('Failed to save message to server:', error);
+        }
+      };
+      saveData();
     }
   }, []);
 
@@ -262,25 +331,7 @@ export const useWebRTC = (ably: Realtime | null) => {
         dataChannelRef.current.send(JSON.stringify(data));
     }
   }, []);
-
-  const hangUp = useCallback(() => {
-    ablyChannelRef.current?.presence.leave();
-    ablyChannelRef.current?.unsubscribe();
-    ablyChannelRef.current = null;
-    peerConnectionRef.current?.close();
-    localStream?.getTracks().forEach(track => track.stop());
-    remoteStream?.getTracks().forEach(track => track.stop());
-    peerConnectionRef.current = null;
-    setLocalStream(null);
-    setRemoteStream(null);
-    setIsConnected(false);
-    setIsJoining(false);
-    setMessages([]);
-    setMediaError(null);
-    earlyIceCandidatesRef.current = [];
-    console.log('Call ended and resources cleaned up.');
-  }, [localStream, remoteStream]);
-
+  
   const toggleMute = useCallback(() => {
     if (localStream) {
       localStream.getAudioTracks().forEach(track => {
@@ -302,7 +353,7 @@ export const useWebRTC = (ably: Realtime | null) => {
   
   useEffect(() => {
     return () => hangUp();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return {

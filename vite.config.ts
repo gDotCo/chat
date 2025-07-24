@@ -12,6 +12,16 @@ export default defineConfig(({ mode }) => {
       alias: {
         '@': path.resolve(__dirname, '.'),
       }
-    }
+    },
+  server: {
+    proxy: {
+      '/api': {
+        target: 'https://www.hamper-studio.store/api',
+        changeOrigin: true,
+        secure: false,
+        rewrite: (path) => path.replace(/^\/api/, ''),
+      },
+    },
+  },
   };
 });
