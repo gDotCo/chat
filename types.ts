@@ -5,7 +5,7 @@ export interface Message {
   type: 'chat';
   id: string;
   text: string;
-  sender: string;
+  username: string;
   timestamp: string;
 }
 
@@ -40,6 +40,8 @@ export type CanvasEventData = DrawData | TextData | ClearData;
 export type DataChannelData = Message | CanvasEventData;
 
 export type SignalingMessage =
-  | { type: 'offer'; sdp: string; from: string }
+  | { type: 'offer'; sdp: string; from: string; callType: View }
   | { type: 'answer'; sdp: string; from: string }
-  | { type: 'ice-candidate'; candidate: RTCIceCandidateInit; from: string };
+  | { type: 'ice-candidate'; candidate: RTCIceCandidateInit; from: string }
+  | { type: 'reject'; from: string }
+  | { type: 'cancel'; from: string };
