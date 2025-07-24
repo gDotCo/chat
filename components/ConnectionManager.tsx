@@ -20,11 +20,6 @@ export const RoomConnector: React.FC<RoomConnectorProps> = ({ onJoin, isJoining 
 
   return (
     <div className="p-6 bg-dark-surface rounded-lg shadow-lg max-w-md mx-auto text-center">
-      <Icon path={ICON_PATHS.logo} className="w-16 h-16 text-blue-400 mx-auto mb-4" />
-      <h2 className="text-2xl font-bold text-dark-text-primary mb-2">Connect with a Peer</h2>
-      <p className="text-dark-text-secondary mb-6">
-        Enter a unique room name to start or join a call. Share the same room name with your friend.
-      </p>
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
         <input
           type="text"

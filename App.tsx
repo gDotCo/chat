@@ -1,7 +1,6 @@
 
-
 import React, { useState, useMemo, useEffect } from 'react';
-import Ably, {Realtime} from 'ably';
+import Ably from 'ably';
 import { useWebRTC } from './hooks/useWebRTC';
 import { View } from './types';
 import { RoomConnector } from './components/ConnectionManager';
@@ -17,6 +16,7 @@ const App: React.FC = () => {
   const [ably, setAbly] = useState<Ably.Realtime | null>(null);
   const [ablyError, setAblyError] = useState<string | null>(null);
   const [username, setUsername] = useState<string>('');
+  const [roomName, setRoomName] = useState<string>('');
 
   useEffect(() => {
     // Vite injects environment variables here.
@@ -24,11 +24,11 @@ const App: React.FC = () => {
     const ABLY_API_KEY = import.meta.env.VITE_ABLY_KEY;
 
     if (!ABLY_API_KEY) {
-      setAblyError("Ably API Key not found. Ensure VITE_ABLY_KEY is set in your environment or GitHub Secrets.");
+      setAblyError("Ably API Key not found. Ensure VITE_ABLY_API_KEY is set in your environment or GitHub Secrets.");
       return;
     }
     
-    const ablyClient = new Realtime({
+    const ablyClient = new Ably.Realtime({
       key: ABLY_API_KEY,
       clientId: `user-${Math.random().toString(36).substring(2, 9)}`
     });
@@ -48,19 +48,21 @@ const App: React.FC = () => {
   }, []);
 
   const {
-    localStream, remoteStream, messages, isConnected, isMuted, isVideoEnabled, isJoining, mediaError, lastCanvasEvent,
+    localStream, remoteStream, messages, hasJoinedRoom, isConnected, isMuted, isVideoEnabled, isJoining, mediaError, lastCanvasEvent,
     joinRoom, sendMessage, hangUp, toggleMute, toggleVideo, sendDrawData, sendClearCanvas, sendTextData
-  } = useWebRTC(ably, username);
+  } = useWebRTC(ably, username, roomName);
 
   const handleHangUp = () => {
     hangUp();
+    setRoomName('');
     setCurrentView('chat');
   };
   
-  const handleJoinRoom = (roomName: string, newUsername: string) => {
+  const handleJoinRoom = (newRoomName: string, newUsername: string) => {
       if(ably) {
           setUsername(newUsername);
-          joinRoom(roomName);
+          setRoomName(newRoomName);
+          joinRoom();
       }
   }
 
@@ -69,27 +71,12 @@ const App: React.FC = () => {
       return <div className="p-8 text-center text-red-400">{ablyError}</div>;
     }
     
-    if (!ably || (!isConnected && !isJoining)) {
+    if (!ably || !hasJoinedRoom) {
       return (
         <div className="p-4 md:p-8 flex items-center justify-center h-full">
             <RoomConnector onJoin={handleJoinRoom} isJoining={isJoining} />
         </div>
       );
-    }
-    
-    if (isJoining && !localStream) {
-       return (
-        <div className="p-8 text-center text-dark-text-secondary">
-          <div className="flex items-center justify-center gap-2">
-            <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-            </svg>
-            Joining room...
-          </div>
-          {mediaError && <p className="mt-4 text-sm text-yellow-400">{mediaError}</p>}
-        </div>
-       );
     }
 
     switch (currentView) {
@@ -112,26 +99,37 @@ const App: React.FC = () => {
         );
       case 'chat':
       default:
-        return <ChatView messages={messages} sendMessage={sendMessage} username={username}/>;
+        return <ChatView messages={messages} sendMessage={sendMessage} username={username} />;
     }
-  }, [ably, ablyError, isConnected, isJoining, currentView, localStream, remoteStream, isMuted, isVideoEnabled, toggleMute, toggleVideo, handleHangUp, messages, sendMessage, handleJoinRoom, mediaError, lastCanvasEvent, sendDrawData, sendClearCanvas, sendTextData]);
+  }, [ably, ablyError, hasJoinedRoom, isJoining, currentView, localStream, remoteStream, isMuted, isVideoEnabled, toggleMute, toggleVideo, handleHangUp, messages, sendMessage, handleJoinRoom, mediaError, lastCanvasEvent, sendDrawData, sendClearCanvas, sendTextData]);
 
-  const statusText = isJoining ? 'Joining...' : (isConnected ? 'Connected' : 'Disconnected');
-  const statusColor = isJoining ? 'bg-yellow-500' : (isConnected ? 'bg-green-500' : 'bg-red-500');
+  const { statusText, statusColor } = useMemo(() => {
+    if (isJoining) {
+        return { statusText: 'Connecting...', statusColor: 'bg-yellow-500' };
+    }
+    if (isConnected) {
+        return { statusText: 'Connected', statusColor: 'bg-green-500' };
+    }
+    if (hasJoinedRoom) {
+        return { statusText: 'Waiting for Peer', statusColor: 'bg-blue-500' };
+    }
+    return { statusText: 'Disconnected', statusColor: 'bg-red-500' };
+  }, [isJoining, isConnected, hasJoinedRoom]);
+  
 
   return (
     <div className="antialiased min-h-screen flex flex-col items-center justify-center p-4 bg-dark-bg">
       <div className="w-full max-w-4xl h-[90vh] flex flex-col bg-dark-surface rounded-lg shadow-2xl border border-dark-border">
         <header className="flex items-center justify-between p-4 border-b border-dark-border">
           <div className="flex items-center gap-3">
-            <Icon path={ICON_PATHS.logo} className="w-8 h-8 text-blue-400"/>
-            <h1 className="text-xl font-bold text-dark-text-primary">P2P Connect</h1>
           </div>
-          <div className={`absolute top-5 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full text-xs font-medium text-white ${statusColor}`}>
-              {statusText}
-          </div>
+          { hasJoinedRoom && (
+            <div className={`absolute top-5 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full text-xs font-medium text-white ${statusColor}`}>
+                {statusText}
+            </div>
+          )}
           <nav className="flex items-center gap-2">
-            <button onClick={() => setCurrentView('chat')} disabled={!isConnected} className={`p-2 rounded-full transition-colors ${currentView === 'chat' ? 'bg-blue-600' : 'hover:bg-gray-700'} disabled:opacity-50 disabled:cursor-not-allowed`}>
+            <button onClick={() => setCurrentView('chat')} disabled={!hasJoinedRoom} className={`p-2 rounded-full transition-colors ${currentView === 'chat' ? 'bg-blue-600' : 'hover:bg-gray-700'} disabled:opacity-50 disabled:cursor-not-allowed`}>
               <Icon path={ICON_PATHS.chat} />
             </button>
             <button 
@@ -156,7 +154,7 @@ const App: React.FC = () => {
           </nav>
         </header>
         <main className="flex-1 overflow-hidden relative">
-           {mediaError && isConnected && (
+           {mediaError && hasJoinedRoom && (
             <div className="absolute top-0 left-0 right-0 p-2 bg-yellow-600 text-white text-center text-sm z-10 animate-pulse">
                 <p>{mediaError}</p>
             </div>
