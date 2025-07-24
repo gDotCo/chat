@@ -21,14 +21,14 @@ export const RoomConnector: React.FC<RoomConnectorProps> = ({ onJoin, isJoining 
   return (
     <div className="p-6 bg-dark-surface rounded-lg shadow-lg max-w-md mx-auto text-center">
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-        <input
+        {/* <input
           type="text"
           value={roomName}
           onChange={(e) => setRoomName(e.target.value)}
           placeholder="Enter room name..."
           className="w-full bg-gray-900 border border-dark-border rounded-lg py-3 px-4 focus:outline-none focus:ring-2 focus:ring-blue-500 text-dark-text-primary transition"
           aria-label="Room name"
-        />
+        /> */}
         <button
           type="submit"
           onClick={() => setUserName('uuu')}
