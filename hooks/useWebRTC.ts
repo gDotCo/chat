@@ -285,18 +285,20 @@ export const useWebRTC = (ably: Ably.Realtime | null, username: string, roomName
     };
     channel.subscribe('webrtc-signal', signalSubscriber);
 
-    const joinSubscriber = (message: Ably.Message) => {
-      const data = message.data;
-      if (!data || !data.from || data.from === myClientId) return;
-      const peerClientId = data.from;
-
-      console.log(`'user-joined' received from ${peerClientId}.`);
+    const initiateCallIfMyTurn = (peerClientId: string) => {
       if (myClientId > peerClientId) {
         console.log(`My ID (${myClientId}) is greater than peer's (${peerClientId}). Initiating call.`);
         initiateCall();
+      } else {
+        console.log(`My ID (${myClientId}) is not greater than peer's (${peerClientId}). Waiting for offer.`);
       }
     };
-    channel.subscribe('user-joined', joinSubscriber);
+
+    const presenceEnterSubscriber = (member: Ably.PresenceMessage) => {
+      if (member.clientId === myClientId) return;
+      initiateCallIfMyTurn(member.clientId);
+    };
+    channel.presence.subscribe('enter', presenceEnterSubscriber);
 
     const leaveSubscriber = (member: Ably.PresenceMessage) => {
       if (member.clientId !== myClientId) {
@@ -306,13 +308,20 @@ export const useWebRTC = (ably: Ably.Realtime | null, username: string, roomName
     };
     channel.presence.subscribe('leave', leaveSubscriber);
 
-    // Announce our arrival.
-    channel.publish('user-joined', { from: myClientId });
+    // Check for members already in the room when we join
+    channel.presence.get().then((presentMembers) => {
+      const peer = presentMembers.find(member => member.clientId !== myClientId);
+      if (peer) {
+        initiateCallIfMyTurn(peer.clientId);
+      }
+    });
+
+    // Announce our arrival via presence.
     channel.presence.enter();
 
     return () => {
       channel.unsubscribe('webrtc-signal', signalSubscriber);
-      channel.unsubscribe('user-joined', joinSubscriber);
+      channel.presence.unsubscribe('enter', presenceEnterSubscriber);
       channel.presence.unsubscribe('leave', leaveSubscriber);
       channel.presence.leave();
     }
