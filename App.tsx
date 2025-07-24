@@ -1,4 +1,5 @@
 
+
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import Ably from 'ably';
 import { useWebRTC } from './hooks/useWebRTC';
@@ -22,6 +23,10 @@ const App: React.FC = () => {
 
   const handleCallAccepted = useCallback((callType: View) => {
     setCurrentView(callType);
+  }, []);
+  
+  const handleCallEnded = useCallback(() => {
+    setCurrentView('chat');
   }, []);
 
   useEffect(() => {
@@ -56,12 +61,12 @@ const App: React.FC = () => {
     isPeerPresent, callState, incomingCallInfo,
     startCall, sendMessage, hangUp, toggleMute, toggleVideo, sendDrawData, sendClearCanvas, sendTextData,
     acceptCall, rejectCall, cancelCall
-  } = useWebRTC(ably, username, roomName, handleCallAccepted);
+  } = useWebRTC(ably, username, roomName, handleCallAccepted, handleCallEnded);
 
   const handleHangUp = useCallback(() => {
     hangUp();
-    setRoomName('');
-    setUsername('');
+    // setRoomName('');
+    // setUsername('');
     setCurrentView('chat');
   }, [hangUp]);
   
@@ -149,18 +154,11 @@ const App: React.FC = () => {
     <div className="antialiased min-h-screen flex flex-col items-center justify-center p-4 bg-dark-bg">
       <div className="w-full max-w-4xl h-[90vh] flex flex-col bg-dark-surface rounded-lg shadow-2xl border border-dark-border">
         <header className="flex items-center justify-between p-4 border-b border-dark-border">
-          <div className="flex items-center gap-3">
-            <Icon path={ICON_PATHS.logo} className="w-8 h-8 text-blue-400"/>
-            <h1 className="text-xl font-bold text-dark-text-primary">P2P Connect</h1>
-          </div>
           { hasJoinedRoom && (
             <div className="flex items-center gap-4">
               <div className={`px-3 py-1 rounded-full text-xs font-medium text-white ${statusColor}`}>
                   {statusText}
               </div>
-              <button onClick={handleHangUp} className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-3 rounded-lg transition-colors text-sm">
-                  Hang Up
-              </button>
             </div>
           )}
         </header>

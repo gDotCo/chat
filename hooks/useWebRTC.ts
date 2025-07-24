@@ -28,7 +28,8 @@ export const useWebRTC = (
   ably: Ably.Realtime | null,
   username: string,
   roomName: string,
-  onCallAccepted: (callType: View) => void
+    onCallAccepted: (callType: View) => void,
+    onCallEnded: () => void
 ) => {
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
@@ -80,7 +81,7 @@ export const useWebRTC = (
     }
   }, [username]);
 
-  const resetLocalState = useCallback(() => {
+  const resetConnectionState = useCallback(() => {
     if (peerConnectionRef.current) {
       peerConnectionRef.current.onicecandidate = null;
       peerConnectionRef.current.ontrack = null;
@@ -89,14 +90,25 @@ export const useWebRTC = (
       peerConnectionRef.current.close();
       peerConnectionRef.current = null;
     }
+    if (dataChannelRef.current) {
+      dataChannelRef.current.onopen = null;
+      dataChannelRef.current.onmessage = null;
+      dataChannelRef.current.onclose = null;
+      dataChannelRef.current = null;
+    }
     setRemoteStream(null);
     setIsConnected(false);
+    earlyIceCandidatesRef.current = [];
+  }, []);
+
+  const resetLocalState = useCallback(() => {
+    resetConnectionState();
     setCallState('idle');
     setIncomingCallInfo(null);
     offerSdpRef.current = null;
-    earlyIceCandidatesRef.current = [];
     activeCallTypeRef.current = null;
-  }, []);
+    onCallEnded();
+  }, [resetConnectionState, onCallEnded]);
 
   const hangUp = useCallback(() => {
     ablyChannelRef.current?.presence.leave();
@@ -124,10 +136,11 @@ export const useWebRTC = (
       }
     };
     dc.onclose = () => console.log('Data channel is closed');
+    dataChannelRef.current = dc;
   }, []);
 
   const setupPeerConnection = useCallback((stream: MediaStream | null) => {
-    resetLocalState();
+    resetConnectionState();
     const pc = new RTCPeerConnection(ICE_SERVERS);
 
     pc.onicecandidate = (event) => {
@@ -139,7 +152,6 @@ export const useWebRTC = (
 
     pc.ontrack = (event) => setRemoteStream(event.streams[0]);
     pc.ondatachannel = (event) => {
-      dataChannelRef.current = event.channel;
       setupDataChannel(event.channel);
     };
 
@@ -163,7 +175,7 @@ export const useWebRTC = (
     }
     peerConnectionRef.current = pc;
     return pc;
-  }, [resetLocalState, setupDataChannel, ably, onCallAccepted]);
+  }, [resetConnectionState, setupDataChannel, ably, onCallAccepted, resetLocalState]);
 
   const startLocalStream = useCallback(async (video: boolean, audio: boolean) => {
     if (localStream) return localStream;
@@ -212,8 +224,8 @@ export const useWebRTC = (
     activeCallTypeRef.current = callType;
     const stream = await startLocalStream(true, true);
     const pc = setupPeerConnection(stream);
-    dataChannelRef.current = pc.createDataChannel('chat');
-    setupDataChannel(dataChannelRef.current);
+    const dc = pc.createDataChannel('chat');
+    setupDataChannel(dc);
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
     const message: SignalingMessage = { type: 'offer', sdp: offer.sdp!, from: ably.auth.clientId, callType };
@@ -276,7 +288,7 @@ export const useWebRTC = (
       const data = message.data as SignalingMessage;
       if (!data || data.from === myClientId) return;
 
-      switch (data.type) {
+        switch(data.type) {
         case 'offer':
           if (callStateRef.current !== 'idle') return;
           offerSdpRef.current = data.sdp;
@@ -351,7 +363,10 @@ export const useWebRTC = (
   const toggleMute = useCallback(() => { if (localStream) { localStream.getAudioTracks()[0].enabled = !localStream.getAudioTracks()[0].enabled; setIsMuted(!localStream.getAudioTracks()[0].enabled); } }, [localStream]);
   const toggleVideo = useCallback(() => { if (localStream) { localStream.getVideoTracks()[0].enabled = !localStream.getVideoTracks()[0].enabled; setIsVideoEnabled(localStream.getVideoTracks()[0].enabled); } }, [localStream]);
 
-  // useEffect(() => () => hangUp(), [hangUp]);
+  useEffect(() => {
+    () => hangUp()
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return {
     localStream, remoteStream, messages, hasJoinedRoom, isConnected, isMuted, isVideoEnabled, mediaError, lastCanvasEvent,
