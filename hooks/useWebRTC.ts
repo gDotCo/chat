@@ -1,7 +1,7 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 import Ably from 'ably';
-import { Message, SignalingMessage, DataChannelData, CanvasEventData, View, DrawData, TextData, ClearData, ReactionData } from '../types';
+import { Message, SignalingMessage, DataChannelData, CanvasEventData, View, DrawData, TextData, ClearData, ReactionData, ReplyInfo } from '../types';
 
 const ICE_SERVERS = {
   iceServers: [
@@ -12,7 +12,7 @@ const ICE_SERVERS = {
       username: 'openrelayproject',
       credential: 'openrelayproject',
     },
-    {
+  {
       urls: 'turn:openrelay.metered.ca:443',
       username: 'openrelayproject',
       credential: 'openrelayproject',
@@ -43,6 +43,10 @@ export const useWebRTC = (
 
   const [callState, setCallState] = useState<CallState>('idle');
   const [incomingCallInfo, setIncomingCallInfo] = useState<IncomingCallInfo | null>(null);
+  
+  const [page, setPage] = useState(1);
+  const [hasMoreMessages, setHasMoreMessages] = useState(true);
+  const [isFetchingHistory, setIsFetchingHistory] = useState(false);
 
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const dataChannelRef = useRef<RTCDataChannel | null>(null);
@@ -54,25 +58,32 @@ export const useWebRTC = (
   const callStateRef = useRef(callState);
   useEffect(() => { callStateRef.current = callState; }, [callState]);
 
-  const fetchHistory = useCallback(async () => {
-    if (!username) return;
+  const loadMoreMessages = useCallback(async () => {
+    if (!username || isFetchingHistory || !hasMoreMessages) return;
+    setIsFetchingHistory(true);
     try {
-      const response = await fetch(`/api/data?limit=200&page=1`);
+        const response = await fetch(`/api/data?limit=50&page=${page}&user=${username}`);
       if (!response.ok) throw new Error(`Failed to fetch message history: ${response.status}`);
       const historyData = await response.json();
-      if (!historyData || !Array.isArray(historyData.items)) return;
+        
+        if (!historyData || !Array.isArray(historyData.items) || historyData.items.length === 0) {
+            setHasMoreMessages(false);
+            return;
+        }
 
       const historyItems = historyData.items;
 
+        const allMessagesForReplyLookup = [...messages, ...historyItems];
+
       const fetchedMessages: Message[] = historyItems.map((item: any): Message => {
-        let replyingTo: Message['replyingTo'] | undefined = undefined;
+            let replyingTo: ReplyInfo | undefined = undefined;
         if (item.replyingTo) {
-          const repliedToMessage = historyItems.find(h => String(h.id) === String(item.replyingTo));
+                const repliedToMessage = allMessagesForReplyLookup.find(h => String(h.id) === String(item.replyingTo));
           if (repliedToMessage) {
             replyingTo = {
               id: String(repliedToMessage.id),
               text: repliedToMessage.message,
-              username: repliedToMessage.username,
+              username: repliedToMessage.username
             };
           }
         }
@@ -84,7 +95,7 @@ export const useWebRTC = (
         username: item.username,
         timestamp: item.timestamp ? new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
           replyingTo: replyingTo,
-          reactions: {}, // Reactions are not persisted
+                reactions: item.reactions || {},
         };
       }).reverse();
 
@@ -93,10 +104,15 @@ export const useWebRTC = (
         const newMessages = fetchedMessages.filter(m => !existingIds.has(m.id));
         return [...newMessages, ...prev];
       });
+
+        setPage(prev => prev + 1);
+        setHasMoreMessages(historyData.hasMore);
     } catch (error) {
       console.error('Error fetching message history:', error);
+      } finally {
+        setIsFetchingHistory(false);
     }
-  }, [username]);
+  }, [username, isFetchingHistory, hasMoreMessages, page, messages]);
 
   const resetConnectionState = useCallback(() => {
     if (peerConnectionRef.current) {
@@ -140,6 +156,8 @@ export const useWebRTC = (
     setIsPeerPresent(false);
     setMessages([]);
     setMediaError(null);
+    setPage(1);
+    setHasMoreMessages(true);
   }, [localStream, resetLocalState]);
 
   const handleReaction = useCallback((messageId: string, emoji: string, reactorUsername: string) => {
@@ -170,7 +188,7 @@ export const useWebRTC = (
     dc.onmessage = (event) => {
       const data: DataChannelData = JSON.parse(event.data);
       if (data.type === 'chat') {
-        setMessages((prev) => [...prev, { ...data}]);
+        setMessages((prev) => [...prev, { ...data }]);
       } else if (data.type === 'reaction') {
         handleReaction(data.messageId, data.emoji, data.username);
       } else if (data.type === 'draw' || data.type === 'clear' || data.type === 'text') {
@@ -317,9 +335,9 @@ export const useWebRTC = (
   useEffect(() => {
     if (ably && username && roomName && !hasJoinedRoom) {
       setHasJoinedRoom(true);
-      fetchHistory();
+      loadMoreMessages();
     }
-  }, [ably, username, roomName, hasJoinedRoom, fetchHistory]);
+  }, [ably, username, roomName, hasJoinedRoom, loadMoreMessages]);
 
   useEffect(() => {
     if (!hasJoinedRoom || !ably || !roomName) return;
@@ -332,7 +350,7 @@ export const useWebRTC = (
       const data = message.data as SignalingMessage;
       if (!data || data.from === myClientId) return;
 
-      switch (data.type) {
+        switch(data.type) {
         case 'offer':
           if (callStateRef.current !== 'idle') return;
           offerSdpRef.current = data.sdp;
@@ -436,8 +454,8 @@ export const useWebRTC = (
 
   return {
     localStream, remoteStream, messages, hasJoinedRoom, isConnected, isMuted, isVideoEnabled, mediaError, lastCanvasEvent,
-    isPeerPresent, callState, incomingCallInfo,
+    isPeerPresent, callState, incomingCallInfo, isFetchingHistory, hasMoreMessages,
     startCall, sendMessage, hangUp, toggleMute, toggleVideo, sendDrawData, sendClearCanvas, sendTextData,
-    acceptCall, rejectCall, cancelCall, sendReaction
+    acceptCall, rejectCall, cancelCall, sendReaction, loadMoreMessages
   };
 };

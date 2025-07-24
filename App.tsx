@@ -57,15 +57,15 @@ const App: React.FC = () => {
 
   const {
     localStream, remoteStream, messages, hasJoinedRoom, isConnected, isMuted, isVideoEnabled, mediaError, lastCanvasEvent,
-    isPeerPresent, callState, incomingCallInfo,
+    isPeerPresent, callState, incomingCallInfo, isFetchingHistory, hasMoreMessages,
     startCall, sendMessage, hangUp, toggleMute, toggleVideo, sendDrawData, sendClearCanvas, sendTextData,
-    acceptCall, rejectCall, cancelCall, sendReaction
+    acceptCall, rejectCall, cancelCall, sendReaction, loadMoreMessages
   } = useWebRTC(ably, username, roomName, handleCallAccepted, handleCallEnded);
 
   const handleHangUp = useCallback(() => {
     hangUp();
-    // setRoomName('');
-    // setUsername('');
+    setRoomName('');
+    setUsername('');
     setCurrentView('chat');
   }, [hangUp]);
   
@@ -117,9 +117,9 @@ const App: React.FC = () => {
         );
       case 'chat':
       default:
-        return <ChatView messages={messages} sendMessage={sendMessage} sendReaction={sendReaction} currentUsername={username} />;
+        return <ChatView messages={messages} sendMessage={sendMessage} sendReaction={sendReaction} currentUsername={username} loadMoreMessages={loadMoreMessages} hasMoreMessages={hasMoreMessages} isFetchingHistory={isFetchingHistory} />;
     }
-  }, [ably, ablyError, hasJoinedRoom, callState, currentView, localStream, remoteStream, isMuted, isVideoEnabled, toggleMute, toggleVideo, handleHangUp, messages, sendMessage, handleJoinRoom, mediaError, lastCanvasEvent, sendDrawData, sendClearCanvas, sendTextData, incomingCallInfo, acceptCall, rejectCall, cancelCall, sendReaction, username]);
+  }, [ably, ablyError, hasJoinedRoom, callState, currentView, localStream, remoteStream, isMuted, isVideoEnabled, toggleMute, toggleVideo, handleHangUp, messages, sendMessage, handleJoinRoom, mediaError, lastCanvasEvent, sendDrawData, sendClearCanvas, sendTextData, incomingCallInfo, acceptCall, rejectCall, cancelCall, sendReaction, username, loadMoreMessages, hasMoreMessages, isFetchingHistory]);
 
   const { statusText, statusColor } = useMemo(() => {
     if (callState === 'outgoing') {

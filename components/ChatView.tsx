@@ -1,5 +1,5 @@
 
-import React, { useState, useRef, useEffect, act } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { Message } from '../types';
 import Icon from './Icon';
 import { ICON_PATHS } from '../constants';
@@ -9,23 +9,55 @@ interface ChatViewProps {
   sendMessage: (text: string, replyingToId?: string) => void;
   sendReaction: (messageId: string, emoji: string) => void;
   currentUsername: string;
+  loadMoreMessages: () => void;
+  hasMoreMessages: boolean;
+  isFetchingHistory: boolean;
 }
 
 const REACTION_EMOJIS = ['👍', '❤️', '😂', '🎉', '😢'];
 
-export const ChatView: React.FC<ChatViewProps> = ({ messages, sendMessage, sendReaction, currentUsername }) => {
+export const ChatView: React.FC<ChatViewProps> = ({ messages, sendMessage, sendReaction, currentUsername, loadMoreMessages, hasMoreMessages, isFetchingHistory }) => {
   const [input, setInput] = useState('');
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
   const [replyingTo, setReplyingTo] = useState<Message | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const [isAtBottom, setIsAtBottom] = useState(true);
+  const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
 
-  console.log('activeMenuId:', activeMenuId);
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  useEffect(() => {
+    if (shouldAutoScroll && messagesContainerRef.current) {
+      messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
+    }
+  }, [messages, shouldAutoScroll]);
+  
+  useLayoutEffect(() => {
+    const chatContainer = messagesContainerRef.current;
+    if (chatContainer && isFetchingHistory) {
+      const { scrollHeight, scrollTop } = chatContainer;
+      const oldScrollHeight = scrollHeight - scrollTop;
+
+      const observer = new MutationObserver(() => {
+        chatContainer.scrollTop = chatContainer.scrollHeight - oldScrollHeight;
+        observer.disconnect();
+      });
+
+      observer.observe(chatContainer, { childList: true });
+    }
+  }, [isFetchingHistory]);
+
+  const handleScroll = () => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+
+    const atBottom = container.scrollHeight - container.scrollTop === container.clientHeight;
+    setIsAtBottom(atBottom);
+    setShouldAutoScroll(atBottom);
+
+    if (container.scrollTop === 0 && hasMoreMessages && !isFetchingHistory) {
+      loadMoreMessages();
+    }
   };
-
-  useEffect(scrollToBottom, [messages]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -43,6 +75,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ messages, sendMessage, sendR
       sendMessage(input.trim(), replyingTo?.id);
       setInput('');
       setReplyingTo(null);
+      setShouldAutoScroll(true);
     }
   };
 
@@ -58,14 +91,22 @@ export const ChatView: React.FC<ChatViewProps> = ({ messages, sendMessage, sendR
 
   return (
     <div className="flex flex-col h-full bg-dark-surface rounded-b-lg">
-      <div className="flex-1 p-4 overflow-y-auto space-y-2">
+      <div ref={messagesContainerRef} onScroll={handleScroll} className="flex-1 p-4 overflow-y-auto space-y-2">
+        {isFetchingHistory && (
+             <div className="flex justify-center my-4">
+                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-400"></div>
+             </div>
+        )}
         {messages.map((msg) => (
           <div
             key={msg.id}
             className={`group flex items-end gap-2 ${msg.username === currentUsername ? 'justify-end' : 'justify-start'}`}
           >
             <div
-              onClick={(e) => {e.stopPropagation(); setActiveMenuId(am=> msg.id == am ? null : msg.id);console.log('clicked', msg.id)}}
+              onClick={(e) => {
+                e.stopPropagation();
+                setActiveMenuId(msg.id === activeMenuId ? null : msg.id);
+              }}
               className={`relative max-w-xs lg:max-w-md px-4 py-2 rounded-2xl cursor-pointer ${
                 msg.username === currentUsername
                   ? 'bg-blue-600 text-white rounded-br-none'
@@ -81,13 +122,10 @@ export const ChatView: React.FC<ChatViewProps> = ({ messages, sendMessage, sendR
                 </div>
               )}
               <p className="text-sm whitespace-pre-wrap break-words">{msg.text}</p>
-              {/* <p>{ msg.username}</p> */}
-              <p className="text-xs text-right mt-1 opacity-50">{msg.timestamp}</p>
-              {/* <p>{JSON.stringify(msg.reactions)}</p> */}
-              {/* <p>{Object.keys(msg.reactions).join(', ')}</p> */}
+              <p className="text-xs text-right mt-1 opacity-40">{msg.timestamp}</p>
 
               {msg.reactions && Object.keys(msg.reactions).length > 0 && (
-                 <div className=" -bottom-3 right-2 flex gap-1">
+                 <div className="absolute -bottom-3 right-2 flex gap-1">
                     {Object.entries(msg.reactions).map(([emoji, users]) => (
                         users.length > 0 && (
                             <div key={emoji} className="bg-dark-surface border border-dark-border rounded-full px-2 py-0.5 text-xs flex items-center shadow">
@@ -100,8 +138,8 @@ export const ChatView: React.FC<ChatViewProps> = ({ messages, sendMessage, sendR
               )}
             </div>
 
-            {activeMenuId == msg.id && (
-                <div ref={menuRef} className=" z-10 -mt-8 bg-dark-surface border border-dark-border p-1 rounded-full shadow-lg flex items-center gap-1">
+            {activeMenuId === msg.id && (
+                <div ref={menuRef} className="absolute z-10 -mt-8 bg-dark-surface border border-dark-border p-1 rounded-full shadow-lg flex items-center gap-1">
                     {REACTION_EMOJIS.map(emoji => (
                         <button key={emoji} onClick={() => handleReactionClick(msg.id, emoji)} className={`p-1.5 rounded-full hover:bg-gray-600 transition-colors text-xl leading-none ${msg.reactions?.[emoji]?.includes(currentUsername) ? 'bg-blue-800' : ''}`}>
                             {emoji}
@@ -115,7 +153,6 @@ export const ChatView: React.FC<ChatViewProps> = ({ messages, sendMessage, sendR
             )}
           </div>
         ))}
-         <div ref={messagesEndRef} />
       </div>
       <div className="p-4 border-t border-dark-border">
         {replyingTo && (
