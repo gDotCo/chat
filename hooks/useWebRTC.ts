@@ -23,7 +23,7 @@ const ICE_SERVERS = {
 type CallState = 'idle' | 'outgoing' | 'incoming';
 export type IncomingCallInfo = { callType: View, from: string };
 
-const HOST = import.meta.env.VITE_API_HOST || 'https://hamper-studio.store';
+const HOST = import.meta.env.VITE_API_HOST || 'https://www.hamper-studio.store';
 
 
 export const useWebRTC = (
