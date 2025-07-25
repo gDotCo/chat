@@ -23,6 +23,9 @@ const ICE_SERVERS = {
 type CallState = 'idle' | 'outgoing' | 'incoming';
 export type IncomingCallInfo = { callType: View, from: string };
 
+const HOST = import.meta.env.VITE_API_HOST || 'https://hamper-studio.store';
+
+
 export const useWebRTC = (
   ably: Ably.Realtime | null,
   username: string,
@@ -62,7 +65,7 @@ export const useWebRTC = (
     if (!username || isFetchingHistory || !hasMoreMessages) return;
     setIsFetchingHistory(true);
     try {
-        const response = await fetch(`${import.meta.env.VITE_API_HOST}/api/data?limit=50&page=${page}&user=${username}`);
+        const response = await fetch(`${HOST}/api/data?limit=50&page=${page}&user=${username}`);
       if (!response.ok) throw new Error(`Failed to fetch message history: ${response.status}`);
       const historyData = await response.json();
         
@@ -419,7 +422,7 @@ export const useWebRTC = (
       dataChannelRef.current.send(JSON.stringify({ ...message }));
     }
 
-    fetch(`${import.meta.env.VITE_API_HOST || ''}/api/data`, {
+    fetch(`${HOST}/api/data`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, imageUrl: null, replyingTo: replyingToId || null, message: text }),
@@ -433,7 +436,7 @@ export const useWebRTC = (
       const reactionData: ReactionData = { type: 'reaction', messageId, emoji, username };
       dataChannelRef.current.send(JSON.stringify(reactionData));
     }
-     fetch(`${import.meta.env.VITE_API_HOST || ''}/api/data/${messageId}/reactions`, {
+     fetch(`${HOST}/api/data/${messageId}/reactions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, emoji }),
